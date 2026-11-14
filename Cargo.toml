@@ -1,0 +1,46 @@
+# Canvas workspace: the image and vector editor that sits beside Studio. Engine crates live in
+# `crates/`, the desktop app in `apps/`. The engine never depends on the UI, so documents can be
+# rendered and exported headless.
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+license = "GPL-3.0-or-later"
+authors = ["Odd Omens LLC"]
+
+[workspace.dependencies]
+canvas-core = { path = "crates/canvas-core" }
+canvas-render = { path = "crates/canvas-render" }
+# Iris, the assistant shared with Omina Motion and Omina Develop: her name and settings, the
+# help every app answers from, and how typed requests are read. It lives in the "Omina Motion"
+# project beside this one.
+iris = { path = "../Omina Motion/crates/iris" }
+# Pinned exactly, as in Studio: GPUI is pre-1.0, so upgrades are deliberate.
+gpui-kit = "=0.8.1"
+tiny-skia = "0.11"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "tiff"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+rayon = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Dependencies are optimized even in debug builds, so painting and the UI stay smooth while developing.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
+panic = "abort"

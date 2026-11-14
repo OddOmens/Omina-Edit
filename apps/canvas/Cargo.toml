@@ -1,0 +1,46 @@
+[package]
+name = "canvas"
+description = "Omina Edit (Canvas, in the code): pictures and vector art in one app, beside Omina Motion and Omina Develop."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+canvas-core.workspace = true
+canvas-render.workspace = true
+iris.workspace = true
+gpui-kit.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+# The same image library GPUI uses, for handing it rendered pictures.
+image.workspace = true
+# Remove Background: Studio's cutout (the MobileSAM model, run on this Mac with Candle), shared
+# with Studio rather than copied. It lives in the "Omina Motion" project beside this one.
+studio-cutout = { path = "../../../Omina Motion/crates/studio-cutout" }
+
+# Packaging into Canvas.app with cargo-packager (see Studio's release script for the same setup).
+[package.metadata.packager]
+product-name = "Omina Edit"
+identifier = "com.oddomens.canvas"
+publisher = "Odd Omens LLC"
+category = "Graphics"
+description = "Photo editing, painting and vector design in one app: Photoshop-style layers and retouching, Lightroom-style develop settings and Illustrator-style shapes."
+copyright = "Copyright © 2026 Odd Omens LLC. Free software under the GNU GPL, version 3 or later."
+license-file = "../../LICENSE"
+out-dir = "../../target/packages"
+binaries-dir = "../../target/release"
+binaries = [{ path = "canvas", main = true }]
+resources = ["../../LICENSE"]
+
+[package.metadata.packager.macos]
+minimum-system-version = "13.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }

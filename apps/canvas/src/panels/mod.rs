@@ -1,0 +1,33 @@
+//! The editor's panels. Each module renders one panel (or dialog) from the workspace state.
+
+pub mod align;
+pub mod assistant;
+pub mod assistant_chat;
+pub mod assistant_help;
+pub mod brushes;
+pub mod chrome;
+pub mod color_picker;
+pub mod curves;
+pub mod develop;
+pub mod dialogs;
+pub mod dock;
+pub mod effects;
+pub mod elements;
+pub mod export;
+pub mod fields;
+pub mod handoffs;
+pub mod filter_dialog;
+pub mod history;
+pub mod layers;
+pub mod libraries;
+pub mod media;
+pub mod mockups;
+pub mod onboarding;
+pub mod options;
+pub mod properties;
+pub mod settings;
+pub mod start_screen;
+pub mod templates;
+pub mod toolbar;
+pub mod viewer;
+pub mod views;

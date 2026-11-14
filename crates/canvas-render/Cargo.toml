@@ -1,0 +1,21 @@
+[package]
+name = "canvas-render"
+description = "Canvas's compositor: draws a document (pixels, vectors, text, adjustments, masks, styles) with tiny-skia."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+canvas-core.workspace = true
+tiny-skia.workspace = true
+rayon.workspace = true
+cosmic-text = "0.19"
+
+[dev-dependencies]
+image.workspace = true
+
+[lints]
+workspace = true

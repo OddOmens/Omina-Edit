@@ -1,0 +1,29 @@
+[package]
+name = "canvas-core"
+description = "Canvas's document model, pixel and vector editing, selections, adjustments and the .canvas file format. No UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# How Iris reads which layers a request is about, shared with the other apps.
+iris.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+image.workspace = true
+# Boolean operations on vector shapes (Unite, Subtract, Intersect, Exclude).
+i_overlay = "9"
+# Reads SVG files (styles, `<use>`, transforms and arcs resolved) into plain paths.
+usvg = { version = "=0.45.1", default-features = false }
+# The .canvas file: a zip holding the document's JSON and each layer's pixels as PNG.
+zip = { version = "=1.3.1", default-features = false, features = ["deflate"] }
+base64 = "0.22"
+# Compresses the page inside an exported PDF (PDF's FlateDecode is zlib).
+flate2 = "1"
+
+[lints]
+workspace = true
