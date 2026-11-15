@@ -571,9 +571,16 @@ pub fn make_sure_studio_is_open() -> StudioLaunch {
         return StudioLaunch::Started;
     }
     let Some(program) = std::env::current_exe().ok().and_then(|canvas| studio_programs_near(&canvas).into_iter().next()) else { return StudioLaunch::NotFound };
-    // In its own process group, so it keeps running when Canvas quits.
-    use std::os::unix::process::CommandExt as _;
-    let started = std::process::Command::new(&program).current_dir(program.parent().unwrap_or(Path::new("/"))).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).process_group(0).spawn();
+    let mut command = std::process::Command::new(&program);
+    command.current_dir(program.parent().unwrap_or(Path::new("/"))).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    // On macOS and Linux, in its own process group, so it keeps running when Canvas quits. A
+    // program started on Windows already outlives the one that started it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+    let started = command.spawn();
     let Ok(mut studio) = started else { return StudioLaunch::Failed };
     // A program that can't load (a library it was built against is gone) stops at once; a
     // moment's wait tells that apart from one that is opening.
