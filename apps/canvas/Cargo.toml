@@ -27,7 +27,7 @@ studio-cutout = { path = "../../../Omina Motion/crates/studio-cutout" }
 product-name = "Omina Edit"
 identifier = "com.oddomens.canvas"
 publisher = "Odd Omens LLC"
-category = "Graphics"
+category = "Graphics and Design"
 description = "Photo editing, painting and vector design in one app: Photoshop-style layers and retouching, Lightroom-style develop settings and Illustrator-style shapes."
 copyright = "Copyright © 2026 Odd Omens LLC. Free software under the GNU GPL, version 3 or later."
 license-file = "../../LICENSE"

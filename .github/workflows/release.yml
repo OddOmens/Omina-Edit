@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14, platform: macOS, file: Omina-Edit-macOS.dmg }
+          - { os: macos-latest, platform: macOS, file: Omina-Edit-macOS.dmg }
           - { os: windows-latest, platform: Windows, file: Omina-Edit-Windows-Setup.exe }
           - { os: ubuntu-24.04, platform: Linux, file: Omina-Edit-Linux.AppImage }
     runs-on: ${{ matrix.os }}
@@ -33,9 +33,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: Omina Edit
-      # Remove Background uses Motion's cutout crate, which Edit reads from a "Omina Motion"
-      # folder beside its own. Motion's repository is private, so this needs a token that can
-      # read it, saved as the OMINA_MOTION_TOKEN secret.
+      # Iris (and, for Edit, Remove Background) is shared code that lives in Motion's repository,
+      # which the build reads from an "Omina Motion" folder beside this one. Motion's repository
+      # is private, so this needs a token that can read it, saved as the OMINA_MOTION_TOKEN secret.
       - uses: actions/checkout@v4
         with:
           repository: OddOmens/Omina-Motion
