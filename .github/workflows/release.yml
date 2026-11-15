@@ -43,6 +43,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: Omina Edit
+          # Keep the compiled code even when packaging fails, so a retry doesn't rebuild it all.
+          cache-on-failure: true
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked --version 0.11.8
 
