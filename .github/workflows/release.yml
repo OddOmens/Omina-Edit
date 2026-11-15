@@ -34,12 +34,10 @@ jobs:
         with:
           path: Omina Edit
       # Iris (and, for Edit, Remove Background) is shared code that lives in Motion's repository,
-      # which the build reads from an "Omina Motion" folder beside this one. Motion's repository
-      # is private, so this needs a token that can read it, saved as the OMINA_MOTION_TOKEN secret.
+      # which the build reads from an "Omina Motion" folder beside this one.
       - uses: actions/checkout@v4
         with:
           repository: OddOmens/Omina-Motion
-          token: ${{ secrets.OMINA_MOTION_TOKEN }}
           path: Omina Motion
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
