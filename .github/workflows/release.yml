@@ -1,0 +1,87 @@
+# Builds Omina Edit for macOS, Windows and Linux and, for a version tag (v1.2.3), attaches the
+# installers to that GitHub release under fixed names, so the website can always link to
+# releases/latest/download/<name>. Run it by hand from the Actions tab to test a build; the
+# installers are then kept as the run's artifacts instead.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, platform: macOS, file: Omina-Edit-macOS.dmg }
+          - { os: windows-latest, platform: Windows, file: Omina-Edit-Windows-Setup.exe }
+          - { os: ubuntu-24.04, platform: Linux, file: Omina-Edit-Linux.AppImage }
+    runs-on: ${{ matrix.os }}
+    env:
+      # AppImage tools run without FUSE, which GitHub's Linux machines don't have.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    defaults:
+      run:
+        shell: bash
+        working-directory: Omina Edit
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: Omina Edit
+      # Remove Background uses Motion's cutout crate, which Edit reads from a "Omina Motion"
+      # folder beside its own. Motion's repository is private, so this needs a token that can
+      # read it, saved as the OMINA_MOTION_TOKEN secret.
+      - uses: actions/checkout@v4
+        with:
+          repository: OddOmens/Omina-Motion
+          token: ${{ secrets.OMINA_MOTION_TOKEN }}
+          path: Omina Motion
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Omina Edit
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version 0.11.8
+
+      - name: Install Linux build libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config clang libasound2-dev libfontconfig-dev libfreetype-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libvulkan-dev \
+            libssl-dev libzstd-dev
+
+      - name: Build
+        run: cargo build --release -p canvas
+      - name: Package
+        run: |
+          case "${{ runner.os }}" in
+            macOS) cargo packager --release -p canvas --formats dmg ;;
+            Windows) cargo packager --release -p canvas --formats nsis ;;
+            Linux) cargo packager --release -p canvas --formats appimage ;;
+          esac
+      - name: Collect the installer under its download name
+        run: |
+          mkdir -p dist
+          case "${{ runner.os }}" in
+            macOS) cp target/packages/*.dmg "dist/${{ matrix.file }}" ;;
+            Windows) cp target/packages/*-setup.exe "dist/${{ matrix.file }}" ;;
+            Linux) cp target/packages/*.AppImage "dist/${{ matrix.file }}" ;;
+          esac
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.file }}
+          path: Omina Edit/dist/${{ matrix.file }}
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Omina Edit/dist/${{ matrix.file }}

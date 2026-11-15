@@ -31,6 +31,7 @@ category = "Graphics"
 description = "Photo editing, painting and vector design in one app: Photoshop-style layers and retouching, Lightroom-style develop settings and Illustrator-style shapes."
 copyright = "Copyright © 2026 Odd Omens LLC. Free software under the GNU GPL, version 3 or later."
 license-file = "../../LICENSE"
+icons = ["../../assets/icon/canvas-512@2x.png", "../../assets/icon/canvas-512.png", "../../assets/icon/canvas-256@2x.png", "../../assets/icon/canvas-256.png", "../../assets/icon/canvas-128@2x.png", "../../assets/icon/canvas-128.png", "../../assets/icon/canvas-32@2x.png", "../../assets/icon/canvas-32.png", "../../assets/icon/canvas-16@2x.png", "../../assets/icon/canvas-16.png"]
 out-dir = "../../target/packages"
 binaries-dir = "../../target/release"
 binaries = [{ path = "canvas", main = true }]
