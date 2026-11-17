@@ -61,7 +61,9 @@ jobs:
       - name: Package
         run: |
           case "${{ runner.os }}" in
-            macOS) cargo packager --release -p canvas --formats dmg ;;
+            # The disk image is made by a script that first signs the whole app, so macOS
+            # doesn't report a downloaded copy as damaged.
+            macOS) cargo packager --release -p canvas --formats app && ./scripts/package-macos-dmg.sh "Omina Edit" ;;
             Windows) cargo packager --release -p canvas --formats nsis ;;
             Linux) cargo packager --release -p canvas --formats appimage ;;
           esac
