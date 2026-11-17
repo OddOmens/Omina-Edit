@@ -253,7 +253,7 @@ fn gradient_controls(id: canvas_core::Id, gradient: &Gradient, _workspace: &Work
 
 fn text_card(layer: &Layer, text: &canvas_core::document::TextLayer, workspace: &mut Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     let id = layer.id;
-    let font = super::options::font_menu("text-font", text.style.font_family.clone(), |this, family| {
+    let font = super::options::font_menu("text-font", text.style.font_family.clone(), super::options::FontMenuPlace::Panel, |this, family| {
         let ids = this.state.selected.clone();
         for id in ids {
             this.state.edit_layer(id, "Font", |layer| {

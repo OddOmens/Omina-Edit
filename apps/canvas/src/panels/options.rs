@@ -139,28 +139,55 @@ fn brush_presets(workspace: &Workspace, cx: &mut Context<Workspace>) -> AnyEleme
         .into_any_element()
 }
 
-/// The font menu: every installed family (loaded the first time it opens).
-pub fn font_menu(id: &'static str, current: String, apply: fn(&mut Workspace, String), workspace: &mut Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+/// Where a font menu sits, which sets how large its button is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FontMenuPlace {
+    /// The Character section of the Properties panel, with room for a full-size button.
+    Panel,
+    /// The tool options bar, which is only one short row high.
+    OptionsBar,
+}
+
+/// How large a font's name is drawn in the menu list, so each typeface is easy to tell apart.
+const FONT_PREVIEW_SIZE: f32 = 15.0;
+
+/// The font menu: every installed family (loaded the first time it opens). The button shows the
+/// current family in its own typeface, and each family in the list is drawn in itself, so the
+/// fonts can be compared without trying them on the text.
+pub fn font_menu(id: &'static str, current: String, place: FontMenuPlace, apply: fn(&mut Workspace, String), workspace: &mut Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::button::{Button};
+    use gpui_kit::component::button::Button;
     use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
     if workspace.ui.font_families.is_empty() {
         workspace.ui.font_families = workspace.state.renderer.text.families();
     }
     let families = workspace.ui.font_families.clone();
     let target = cx.weak_entity();
-    let shown = current.clone();
+    let (button_size, label_size) = match place {
+        FontMenuPlace::Panel => (gpui_kit::component::Size::Medium, 14.0),
+        FontMenuPlace::OptionsBar => (gpui_kit::component::Size::Small, 13.0),
+    };
+    let shown = div().min_w_0().text_ellipsis().text_size(px(label_size)).font_family(current.clone()).child(current.clone());
     Button::new(id)
         .outline()
-        .xsmall()
-        .label(shown)
+        .with_size(button_size)
+        .child(shown)
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
             let menu = menu.scrollable(true).max_h(px(420.0));
             families.iter().fold(menu, |menu, family| {
                 let (target, family) = (target.clone(), family.clone());
                 let checked = family == current;
-                menu.item(PopupMenuItem::new(family.clone()).checked(checked).on_click(move |_, _, cx| {
+                let preview = family.clone();
+                let item = PopupMenuItem::element(move |_, _| {
+                    div()
+                        .id(ElementId::Name(format!("font-{preview}").into()))
+                        .text_size(px(FONT_PREVIEW_SIZE))
+                        .font_family(preview.clone())
+                        .child(preview.clone())
+                        .test_support()
+                });
+                menu.item(item.checked(checked).on_click(move |_, _, cx| {
                     let family = family.clone();
                     target
                         .update(cx, |this, cx| {
@@ -295,7 +322,7 @@ pub fn render(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> impl In
         }
         Tool::Type => {
             let family = workspace.state.options.text_style.font_family.clone();
-            items.push(font_menu("options-font", family, |this, family| this.state.options.text_style.font_family = family, workspace, cx));
+            items.push(font_menu("options-font", family, FontMenuPlace::OptionsBar, |this, family| this.state.options.text_style.font_family = family, workspace, cx));
             items.push(hint("Click to type; drag to make a text box that wraps. ⌘Return or Escape finishes."));
         }
         Tool::Shape => {

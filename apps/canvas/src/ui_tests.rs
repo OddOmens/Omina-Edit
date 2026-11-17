@@ -189,6 +189,30 @@ fn escape_goes_from_the_start_screen_to_the_editor_as_its_close_button_says(cx: 
     assert!(!showing(visual, "start-screen"), "Esc goes to the editor");
 }
 
+/// The Type tool's font menu lists each family drawn in its own typeface; clicking one of those
+/// previews still sets the font.
+#[gpui_kit::test]
+fn picking_a_previewed_font_sets_the_type_tools_font(cx: &mut TestAppContext) {
+    let (workspace, visual) = open(cx);
+    crate::app_settings::update(|settings| settings.onboarded = true);
+    launch(&workspace, visual);
+    press_keys(visual, "escape");
+    visual.update(|_, cx| workspace.update(cx, |ws, _| ws.state.set_tool(crate::state::tools::Tool::Type)));
+    render(visual);
+
+    visual.update(|window, cx| window.click("options-font", cx));
+    render(visual);
+    let (current, families) = visual.update(|_, cx| {
+        let ws = workspace.read(cx);
+        (ws.state.options.text_style.font_family.clone(), ws.ui.font_families.clone())
+    });
+    let other = families.iter().find(|family| **family != current).expect("more than one font is installed").clone();
+    assert!(showing(visual, format!("font-{other}")), "the menu lists {other}");
+    visual.update(|window, cx| window.click(format!("font-{other}"), cx));
+    render(visual);
+    visual.update(|_, cx| assert_eq!(workspace.read(cx).state.options.text_style.font_family, other));
+}
+
 /// Renames the open document: an unsaved change that a saved file brings back.
 fn make_an_edit(workspace: &Entity<Workspace>, visual: &mut VisualTestContext, name: &str) {
     visual.update(|_, cx| {
