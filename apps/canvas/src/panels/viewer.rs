@@ -28,6 +28,12 @@ use crate::workspace::{PanelId, Workspace};
 
 /// Space kept between the document and the panel's edge when fitting.
 const FIT_PADDING: f32 = 32.0;
+/// How near, in screen points, a moved layer must come to a grid or center line to snap to it.
+const SNAP_REACH: f32 = 8.0;
+/// The layout grid is hidden when zoomed out so far that its lines would be closer than this,
+/// in screen points.
+const SMALLEST_GRID_GAP: f32 = 4.0;
+
 /// The magnifications the zoom steps go through.
 const ZOOM_LEVELS: [f32; 17] = [0.03125, 0.0625, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 16.0, 32.0];
 /// The most device pixels the canvas draws; beyond this it draws at a lower density.
@@ -620,6 +626,8 @@ pub fn render(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<W
                 drag_select_text(this, point, cx);
                 return;
             }
+            this.state.snap = this.ui.settings.snap_options();
+            this.state.snap_reach = SNAP_REACH / scale(this).max(1e-6);
             this.state.drag(point, keys(event.event.modifiers));
             this.notify_canvas(cx);
         }))
@@ -653,8 +661,6 @@ pub fn render(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<W
 /// The bar under the canvas: zoom, the document's size, where the pointer is, and what
 /// shows under transparency.
 fn status_bar(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoElement + use<> {
-    use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::button::{Button, ButtonVariants as _};
     use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
     let s = scale(workspace);
     let doc = workspace.state.doc();
@@ -663,7 +669,7 @@ fn status_bar(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoEl
         Some(zoom) => format!("{}%", (zoom * 100.0 * 10.0).round() / 10.0),
     };
     let target = cx.weak_entity();
-    let zoom_menu = Button::new("canvas-zoom").ghost().xsmall().label(label).dropdown_caret(true).dropdown_menu(move |menu, _, _| {
+    let zoom_menu = crate::panels::chrome::bar_dropdown("canvas-zoom", label).dropdown_menu(move |menu, _, _| {
         std::iter::once(None).chain([0.25f32, 0.5, 1.0, 2.0, 4.0, 8.0].into_iter().map(Some)).fold(menu, |menu, zoom| {
             let target = target.clone();
             let name = zoom.map_or_else(|| "Fit on Screen".to_owned(), |zoom| format!("{}%", (zoom * 100.0).round()));
@@ -679,7 +685,7 @@ fn status_bar(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoEl
     });
     let current = workspace.ui.settings.transparency;
     let target = cx.weak_entity();
-    let transparency = Button::new("canvas-transparency").ghost().xsmall().label(current.name()).dropdown_caret(true).tooltip("What shows under transparent areas").dropdown_menu(move |menu, _, _| {
+    let transparency = crate::panels::chrome::bar_dropdown("canvas-transparency", current.name()).tooltip("What shows under transparent areas").dropdown_menu(move |menu, _, _| {
         crate::app_settings::Transparency::ALL.into_iter().fold(menu, |menu, choice| {
             let target = target.clone();
             menu.item(PopupMenuItem::new(choice.name()).checked(choice == current).on_click(move |_, _, cx| {
@@ -693,6 +699,7 @@ fn status_bar(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoEl
             }))
         })
     });
+    let snapping = snapping_menu(&workspace.ui.settings, cx);
     let pointer = workspace.ui.viewer.pointer.filter(|point| doc.rect().contains(*point)).map(|point| format!("X {}  Y {}", point.x.floor(), point.y.floor())).unwrap_or_default();
     let selection = doc.selection.as_deref().and_then(Mask::bounds_of_selected).map(|area| format!("Selection {} × {}", area.width, area.height)).unwrap_or_default();
     div()
@@ -708,7 +715,33 @@ fn status_bar(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoEl
         .child(div().flex_1())
         .child(selection)
         .child(div().font_family(crate::theme::MONO_FONT).child(pointer))
+        .child(snapping)
         .child(transparency)
+}
+
+/// The Snapping dropdown in the bar under the canvas: the layout grid, and what moved layers
+/// snap to. It holds the same choices as the View menu, which keeps them in step.
+fn snapping_menu(settings: &crate::app_settings::AppSettings, cx: &mut Context<Workspace>) -> impl IntoElement + use<> {
+    use crate::app_settings::AppSettings;
+    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+    type Field = fn(&mut AppSettings) -> &mut bool;
+    let choices: [(&'static str, &'static str, bool, Field); 4] = [
+        ("snap-layout-grid", "Layout Grid", settings.show_grid, |settings| &mut settings.show_grid),
+        ("snap-to-grid", "Snap to Grid", settings.snap_to_grid, |settings| &mut settings.snap_to_grid),
+        ("snap-to-center", "Snap to Center Lines", settings.snap_to_center, |settings| &mut settings.snap_to_center),
+        ("snap-to-dead-center", "Snap to Dead Center", settings.snap_to_dead_center, |settings| &mut settings.snap_to_dead_center),
+    ];
+    let target = cx.weak_entity();
+    crate::panels::chrome::bar_dropdown("canvas-snapping", "Snapping").tooltip("Layout grid and snapping (hold ⌘ while dragging to move freely)").dropdown_menu(move |menu, _, _| {
+        choices.iter().enumerate().fold(menu, |menu, (index, &(id, name, on, field))| {
+            // The grid itself comes first, apart from what snaps.
+            let menu = if index == 1 { menu.separator() } else { menu };
+            let target = target.clone();
+            menu.item(PopupMenuItem::element(move |_, _| crate::panels::chrome::menu_row(id, name)).checked(on).on_click(move |_, _, cx| {
+                target.update(cx, |this, cx| crate::commands::toggle_setting(this, cx, field)).ok();
+            }))
+        })
+    })
 }
 
 /// A line overlay drawn in the panel's coordinates.
@@ -820,6 +853,42 @@ fn overlays(workspace: &mut Workspace) -> AnyElement {
             grid.push((local(workspace, Vec2::new(start.x, y as f32)), local(workspace, Vec2::new(end.x, y as f32))));
         }
         elements.push(lines_canvas(grid, 1.0, gpui_kit::rgba(0x80808060).into()));
+    }
+
+    // The layout grid, unless its lines would crowd closer than a few screen points.
+    let grid_size = workspace.ui.settings.grid_size as f32;
+    if workspace.ui.settings.show_grid && grid_size > 0.0 && grid_size * s >= SMALLEST_GRID_GAP {
+        let bounds = workspace.ui.viewer.bounds.get();
+        let doc = workspace.state.doc();
+        let start = to_doc(workspace, bounds.left, bounds.top).max(Vec2::ZERO);
+        let end = to_doc(workspace, bounds.left + bounds.width, bounds.top + bounds.height).min(Vec2::new(doc.width as f32, doc.height as f32));
+        let mut grid = Vec::new();
+        let mut x = (start.x / grid_size).ceil() * grid_size;
+        while x <= end.x {
+            grid.push((local(workspace, Vec2::new(x, start.y)), local(workspace, Vec2::new(x, end.y))));
+            x += grid_size;
+        }
+        let mut y = (start.y / grid_size).ceil() * grid_size;
+        while y <= end.y {
+            grid.push((local(workspace, Vec2::new(start.x, y)), local(workspace, Vec2::new(end.x, y))));
+            y += grid_size;
+        }
+        elements.push(lines_canvas(grid, 1.0, gpui_kit::rgba(0x8080804d).into()));
+    }
+
+    // While a moved layer is snapped, the lines it landed on, across the whole document.
+    let snapped = workspace.state.snapped;
+    if snapped.vertical.is_some() || snapped.horizontal.is_some() {
+        let doc = workspace.state.doc();
+        let (width, height) = (doc.width as f32, doc.height as f32);
+        let mut guides = Vec::new();
+        if let Some(x) = snapped.vertical {
+            guides.push((local(workspace, Vec2::new(x, 0.0)), local(workspace, Vec2::new(x, height))));
+        }
+        if let Some(y) = snapped.horizontal {
+            guides.push((local(workspace, Vec2::new(0.0, y)), local(workspace, Vec2::new(width, y))));
+        }
+        elements.push(lines_canvas(guides, 1.0, accent));
     }
 
     // Marching ants around the selection (the outline is worked out once per selection).

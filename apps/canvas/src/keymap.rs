@@ -94,6 +94,7 @@ pub const NAMES: &[(&str, &str, &str)] = &[
     ("zoom-out", "Zoom Out", "View"),
     ("fit", "Fit on Screen", "View"),
     ("actual-size", "100%", "View"),
+    ("layout-grid", "Layout Grid", "View"),
     ("settings", "Settings", "View"),
 ];
 
@@ -170,6 +171,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("zoom-out", "cmd--"),
     ("fit", "cmd-0"),
     ("actual-size", "cmd-1"),
+    ("layout-grid", "cmd-'"),
     ("settings", "cmd-,"),
     ("fill", "shift-backspace"),
 ];

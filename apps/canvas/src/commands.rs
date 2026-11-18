@@ -460,13 +460,21 @@ pub fn bind(root: Div, workspace: &Workspace, cx: &mut Context<Workspace>) -> Di
         panels::viewer::set_zoom(this, Some(1.0));
         cx.notify();
     }))
-    .on_action(cx.listener(|this, _: &TogglePixelGrid, _, cx| {
-        this.ui.settings.pixel_grid = !this.ui.settings.pixel_grid;
-        let on = this.ui.settings.pixel_grid;
-        crate::app_settings::update(|settings| settings.pixel_grid = on);
-        refresh_menus(cx);
-        cx.notify();
-    }))
+    .on_action(cx.listener(|this, _: &TogglePixelGrid, _, cx| toggle_setting(this, cx, |settings| &mut settings.pixel_grid)))
+    .on_action(cx.listener(|this, _: &ToggleLayoutGrid, _, cx| toggle_setting(this, cx, |settings| &mut settings.show_grid)))
+    .on_action(cx.listener(|this, _: &ToggleSnapToGrid, _, cx| toggle_setting(this, cx, |settings| &mut settings.snap_to_grid)))
+    .on_action(cx.listener(|this, _: &ToggleSnapToCenter, _, cx| toggle_setting(this, cx, |settings| &mut settings.snap_to_center)))
+    .on_action(cx.listener(|this, _: &ToggleSnapToDeadCenter, _, cx| toggle_setting(this, cx, |settings| &mut settings.snap_to_dead_center)))
+}
+
+/// Turns one of the View menu's on-or-off choices over, saves it, and updates the menu's
+/// check marks. `field` picks the choice out of the settings.
+pub(crate) fn toggle_setting(this: &mut Workspace, cx: &mut Context<Workspace>, field: fn(&mut crate::app_settings::AppSettings) -> &mut bool) {
+    let on = !*field(&mut this.ui.settings);
+    *field(&mut this.ui.settings) = on;
+    crate::app_settings::update(|settings| *field(settings) = on);
+    refresh_menus(cx);
+    cx.notify();
 }
 
 /// Runs a state change, shows any notices it left, and redraws.

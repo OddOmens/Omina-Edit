@@ -594,7 +594,7 @@ pub fn face(place: &'static str, side: f32, look: Look) -> impl IntoElement {
 /// The small colored label saying which area a suggestion is about.
 fn area_tag(area: Area) -> impl IntoElement {
     let color = area_color(area);
-    div().flex_none().px_1p5().rounded_full().bg(gpui_kit::Hsla::from(color).opacity(0.18)).text_size(px(10.5)).text_color(color).child(area.name())
+    div().flex_none().px_1p5().rounded_full().bg(gpui_kit::Hsla::from(color).opacity(0.18)).text_size(px(size::CAPTION_TEXT)).text_color(color).child(area.name())
 }
 
 /// What the assistant says above its list.
@@ -640,7 +640,7 @@ fn card(index: usize, suggestion: Suggestion, cx: &mut Context<Workspace>) -> im
         .child(div().font_weight(gpui_kit::FontWeight::MEDIUM).child(suggestion.title))
         .child(div().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child(suggestion.detail))
         // What was measured, so the suggestion can be judged rather than taken on trust.
-        .child(div().text_size(px(10.5)).text_color(hsla(color::MUTED)).opacity(0.75).child(suggestion.evidence))
+        .child(div().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).opacity(0.75).child(suggestion.evidence))
         .child(div().pt_1().flex().flex_wrap().items_center().gap_1p5().children(fix_button).child(show_button).child(div().flex_1()).child(dismiss))
         .test_support()
 }
@@ -678,7 +678,7 @@ fn bubble(index: usize, message: &Message, newest: bool, cx: &mut Context<Worksp
     let replies = (newest && !message.replies.is_empty()).then(|| {
         div().id(("assistant-replies", index)).flex().flex_wrap().gap_1().children(message.replies.iter().enumerate().map(|(reply_index, reply)| {
             let text = reply.clone();
-            Button::new(ElementId::Name(format!("assistant-reply-{index}-{reply_index}").into())).outline().xsmall().label(reply.clone()).on_click(cx.listener(move |this, _, window, cx| {
+            Button::new(ElementId::Name(format!("assistant-reply-{index}-{reply_index}").into())).outline().small().label(reply.clone()).on_click(cx.listener(move |this, _, window, cx| {
                 super::assistant_chat::send(this, &text, window, cx);
                 cx.notify();
             }))
@@ -722,7 +722,7 @@ fn conversation(workspace: &Workspace, cx: &mut Context<Workspace>) -> Vec<AnyEl
 /// The line after the messages brought back from last time.
 fn earlier_line() -> AnyElement {
     let rule = || div().flex_1().h(px(1.0)).bg(hsla(color::HAIRLINE));
-    div().id("assistant-earlier").px_3().flex().items_center().gap_2().text_size(px(10.5)).text_color(hsla(color::MUTED)).child(rule()).child("Earlier").child(rule()).test_support().into_any_element()
+    div().id("assistant-earlier").px_3().flex().items_center().gap_2().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).child(rule()).child("Earlier").child(rule()).test_support().into_any_element()
 }
 
 /// The buttons of the recipes put on the toolbar ("put tidy up on the toolbar"), in a strip at
@@ -734,7 +734,7 @@ fn recipe_buttons(workspace: &Workspace, cx: &mut Context<Workspace>) -> Option<
     }
     let buttons = names.into_iter().enumerate().map(|(index, name)| {
         let label = name.clone();
-        Button::new(("assistant-recipe-button", index)).outline().xsmall().label(label).tooltip("Run this recipe").on_click(cx.listener(move |this, _, window, cx| {
+        Button::new(("assistant-recipe-button", index)).outline().small().label(label).tooltip("Run this recipe").on_click(cx.listener(move |this, _, window, cx| {
             super::assistant_chat::run_recipe(this, &name, window, cx);
             cx.notify();
         }))
@@ -816,7 +816,7 @@ fn typing_dots() -> impl IntoElement {
 fn stepper(id: &'static str, label: &'static str, value: i64, range: (i64, i64), unit: &'static str, set: fn(&mut Options, i64), cx: &mut Context<Workspace>) -> impl IntoElement {
     let step = |suffix: &'static str, by: i64, text: &'static str| {
         let next = (value + by).clamp(range.0, range.1);
-        Button::new(ElementId::Name(format!("{id}-{suffix}").into())).outline().xsmall().label(text).on_click(cx.listener(move |this, _, _, cx| {
+        Button::new(ElementId::Name(format!("{id}-{suffix}").into())).outline().small().label(text).on_click(cx.listener(move |this, _, _, cx| {
             change_options(this, move |options| set(options, next));
             this.notify_canvas(cx);
             cx.notify();
@@ -949,7 +949,7 @@ pub fn render(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoEl
     // in the whole list as their number, whichever area is showing.
     let shown_area = workspace.ui.assistant.area.filter(|area| found.iter().any(|suggestion| suggestion.check.area() == *area));
     let chip = |id: usize, label: String, area: Option<Area>, cx: &mut Context<Workspace>| {
-        Button::new(("assistant-area", id)).ghost().xsmall().label(label).selected(shown_area == area).on_click(cx.listener(move |this, _, _, cx| {
+        Button::new(("assistant-area", id)).ghost().small().label(label).selected(shown_area == area).on_click(cx.listener(move |this, _, _, cx| {
             this.ui.assistant.area = area;
             cx.notify();
         }))
@@ -1124,7 +1124,7 @@ pub fn tip(workspace: &Workspace, cx: &mut Context<Workspace>) -> Option<AnyElem
                 }))),
         )
         .child(div().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child(suggestion.detail))
-        .child(div().text_size(px(10.5)).text_color(hsla(color::MUTED)).opacity(0.75).child(suggestion.evidence))
+        .child(div().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).opacity(0.75).child(suggestion.evidence))
         // "Not Now" sits on the left, away from where the folded face was clicked, so a quick
         // second click lands on "See All" rather than switching tips off.
         .child(div().pt_1().flex().flex_wrap().items_center().gap_1p5().child(later).child(div().flex_1()).children(fix_button).child(show_button).child(all))

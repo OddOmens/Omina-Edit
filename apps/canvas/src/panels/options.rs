@@ -62,7 +62,7 @@ pub fn text_button(id: &'static str, label: &'static str, run: fn(&mut Workspace
     use gpui_kit::component::button::Button;
     Button::new(id)
         .outline()
-        .xsmall()
+        .small()
         .label(label)
         .on_click(cx.listener(move |this, _, _, cx| {
             run(this);
@@ -77,7 +77,7 @@ fn morph_button(cx: &mut Context<Workspace>) -> AnyElement {
     use gpui_kit::component::button::Button;
     Button::new("options-morph")
         .outline()
-        .xsmall()
+        .small()
         .label("Morph…")
         .tooltip("Make the in-between shapes from one selected shape to another")
         .on_click(cx.listener(|this, _, window, cx| super::dialogs::morph(this, window, cx)))
@@ -119,7 +119,7 @@ fn brush_presets(workspace: &Workspace, cx: &mut Context<Workspace>) -> AnyEleme
     let target = cx.weak_entity();
     Button::new("brush-presets")
         .ghost()
-        .xsmall()
+        .small()
         .icon(Icon::new(IconName::Paintbrush))
         .dropdown_caret(true)
         .tooltip("Brush presets")
@@ -139,22 +139,60 @@ fn brush_presets(workspace: &Workspace, cx: &mut Context<Workspace>) -> AnyEleme
         .into_any_element()
 }
 
-/// Where a font menu sits, which sets how large its button is.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum FontMenuPlace {
-    /// The Character section of the Properties panel, with room for a full-size button.
-    Panel,
-    /// The tool options bar, which is only one short row high.
-    OptionsBar,
+/// How large a font's name is drawn in the menu list, a step above menu text so each typeface
+/// is easy to tell apart.
+const FONT_PREVIEW_SIZE: f32 = size::HEADING_TEXT;
+/// How large the chosen font's name is drawn on the button, in its own typeface: a step above
+/// the other dropdowns' text, on a button of the same height.
+const FONT_BUTTON_TEXT: f32 = size::LARGE_TEXT;
+/// The height of each row in the font and weight menus, the same as other menu rows. Fonts
+/// differ in how tall their letters stand, so a fixed height keeps the list evenly spaced.
+const FONT_ROW_HEIGHT: f32 = 26.0;
+/// The font and weight menus' width: wide enough for most family names, which are cut short with
+/// an ellipsis past it, rather than growing to fit the longest one.
+const FONT_MENU_WIDTH: f32 = 280.0;
+
+/// The usual names of font weights, by their number (100 is the thinnest, 900 the heaviest).
+const WEIGHT_NAMES: [(u16, &str); 9] = [
+    (100, "Thin"),
+    (200, "Extra Light"),
+    (300, "Light"),
+    (400, "Regular"),
+    (500, "Medium"),
+    (600, "Semibold"),
+    (700, "Bold"),
+    (800, "Extra Bold"),
+    (900, "Black"),
+];
+
+/// The name of the standard weight closest to `weight` ("Regular" for 400).
+pub fn weight_name(weight: u16) -> &'static str {
+    WEIGHT_NAMES.iter().min_by_key(|(value, _)| value.abs_diff(weight)).map_or("Regular", |(_, name)| name)
 }
 
-/// How large a font's name is drawn in the menu list, so each typeface is easy to tell apart.
-const FONT_PREVIEW_SIZE: f32 = 15.0;
+/// A row in the font or weight menu: `label` drawn in `family` at `weight`, on one line, cut
+/// short with an ellipsis if it doesn't fit.
+fn font_row(id: String, label: String, family: String, weight: u16) -> impl IntoElement {
+    div()
+        .id(ElementId::Name(id.into()))
+        .h(px(FONT_ROW_HEIGHT))
+        .min_w_0()
+        .flex()
+        .items_center()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .text_size(px(FONT_PREVIEW_SIZE))
+        .font_family(family)
+        .font_weight(gpui_kit::FontWeight(f32::from(weight)))
+        .child(label)
+        .test_support()
+}
 
-/// The font menu: every installed family (loaded the first time it opens). The button shows the
-/// current family in its own typeface, and each family in the list is drawn in itself, so the
-/// fonts can be compared without trying them on the text.
-pub fn font_menu(id: &'static str, current: String, place: FontMenuPlace, apply: fn(&mut Workspace, String), workspace: &mut Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+/// The font menu: every installed family in alphabetical order (loaded the first time it opens).
+/// The button shows the current family in its own typeface, and each family in the list is drawn
+/// in itself, so the fonts can be compared without trying them on the text.
+pub fn font_menu(id: &'static str, current: String, apply: fn(&mut Workspace, String), workspace: &mut Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     use gpui_kit::component::Sizable as _;
     use gpui_kit::component::button::Button;
     use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -163,35 +201,63 @@ pub fn font_menu(id: &'static str, current: String, place: FontMenuPlace, apply:
     }
     let families = workspace.ui.font_families.clone();
     let target = cx.weak_entity();
-    let (button_size, label_size) = match place {
-        FontMenuPlace::Panel => (gpui_kit::component::Size::Medium, 14.0),
-        FontMenuPlace::OptionsBar => (gpui_kit::component::Size::Small, 13.0),
-    };
-    let shown = div().min_w_0().text_ellipsis().text_size(px(label_size)).font_family(current.clone()).child(current.clone());
+    let shown = div().min_w_0().text_ellipsis().text_size(px(FONT_BUTTON_TEXT)).font_family(current.clone()).child(current.clone());
     Button::new(id)
         .outline()
-        .with_size(button_size)
+        .small()
         .child(shown)
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
-            let menu = menu.scrollable(true).max_h(px(420.0));
+            let menu = menu.scrollable(true).max_h(px(420.0)).min_w(px(FONT_MENU_WIDTH)).max_w(px(FONT_MENU_WIDTH));
             families.iter().fold(menu, |menu, family| {
                 let (target, family) = (target.clone(), family.clone());
                 let checked = family == current;
                 let preview = family.clone();
-                let item = PopupMenuItem::element(move |_, _| {
-                    div()
-                        .id(ElementId::Name(format!("font-{preview}").into()))
-                        .text_size(px(FONT_PREVIEW_SIZE))
-                        .font_family(preview.clone())
-                        .child(preview.clone())
-                        .test_support()
-                });
+                let item = PopupMenuItem::element(move |_, _| font_row(format!("font-{preview}"), preview.clone(), preview.clone(), 400));
                 menu.item(item.checked(checked).on_click(move |_, _, cx| {
                     let family = family.clone();
                     target
                         .update(cx, |this, cx| {
                             apply(this, family);
+                            cx.notify();
+                        })
+                        .ok();
+                }))
+            })
+        })
+        .into_any_element()
+}
+
+/// The weight menu: the weights `family` comes in, lightest first, each drawn in the font at that
+/// weight. The list is looked up when the menu opens; a family that isn't installed offers every
+/// standard weight. The current weight is listed even if the font lacks it.
+pub fn weight_menu(id: &'static str, family: String, current: u16, apply: fn(&mut Workspace, u16), cx: &mut Context<Workspace>) -> AnyElement {
+    use gpui_kit::component::Sizable as _;
+    use gpui_kit::component::button::Button;
+    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+    let target = cx.weak_entity();
+    Button::new(id)
+        .outline()
+        .small()
+        .label(weight_name(current))
+        .dropdown_caret(true)
+        .dropdown_menu(move |menu, _, cx| {
+            let mut weights = target.update(cx, |this, _| this.state.renderer.text.weights(&family)).unwrap_or_default();
+            if weights.is_empty() {
+                weights = WEIGHT_NAMES.iter().map(|(value, _)| *value).collect();
+            }
+            if !weights.contains(&current) {
+                weights.push(current);
+                weights.sort_unstable();
+            }
+            let menu = menu.scrollable(true).max_h(px(420.0)).min_w(px(200.0));
+            weights.into_iter().fold(menu, |menu, weight| {
+                let (target, preview_family) = (target.clone(), family.clone());
+                let item = PopupMenuItem::element(move |_, _| font_row(format!("weight-{weight}"), weight_name(weight).to_owned(), preview_family.clone(), weight));
+                menu.item(item.checked(weight == current).on_click(move |_, _, cx| {
+                    target
+                        .update(cx, |this, cx| {
+                            apply(this, weight);
                             cx.notify();
                         })
                         .ok();
@@ -214,7 +280,7 @@ fn cutout_items(workspace: &Workspace, cx: &mut Context<Workspace>) -> Option<Ve
     let start_over = {
         use gpui_kit::component::Sizable as _;
         use gpui_kit::component::button::Button;
-        Button::new("cutout-start-over").outline().xsmall().label("Start Over").on_click(cx.listener(move |this, _, window, cx| this.start_cutout(layer, window, cx))).into_any_element()
+        Button::new("cutout-start-over").outline().small().label("Start Over").on_click(cx.listener(move |this, _, window, cx| this.start_cutout(layer, window, cx))).into_any_element()
     };
     Some(vec![
         div().text_color(hsla(color::TEXT)).child("Remove Background").into_any_element(),
@@ -322,7 +388,7 @@ pub fn render(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> impl In
         }
         Tool::Type => {
             let family = workspace.state.options.text_style.font_family.clone();
-            items.push(font_menu("options-font", family, FontMenuPlace::OptionsBar, |this, family| this.state.options.text_style.font_family = family, workspace, cx));
+            items.push(font_menu("options-font", family, |this, family| this.state.options.text_style.font_family = family, workspace, cx));
             items.push(hint("Click to type; drag to make a text box that wraps. ⌘Return or Escape finishes."));
         }
         Tool::Shape => {

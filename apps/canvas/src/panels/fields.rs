@@ -377,7 +377,7 @@ pub fn value_field(target: FieldTarget, workspace: &Workspace, cx: &mut Context<
     let Some((value, format)) = target.read(&workspace.state) else { return div().into_any_element() };
     if let Some(input) = workspace.ui.editing.as_ref().filter(|editing| editing.target == EditTarget::Number(target)).and_then(|editing| editing.input.line()) {
         use gpui_kit::component::Sizable as _;
-        return div().w(px(72.0)).child(gpui_kit::component::input::Input::new(input).xsmall()).into_any_element();
+        return div().w(px(72.0)).child(gpui_kit::component::input::Input::new(input).small()).into_any_element();
     }
     div()
         .id(target.element_id("field"))

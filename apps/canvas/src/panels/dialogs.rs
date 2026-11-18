@@ -439,7 +439,7 @@ pub fn new_document(workspace: &mut Workspace, window: &mut Window, cx: &mut Con
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(div().text_size(px(18.0)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child("New Document"))
+                    .child(div().text_size(px(size::PAGE_TITLE_TEXT)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child("New Document"))
                     .child(div().text_color(hsla(color::MUTED)).child("Start from a size, or type your own on the right.")),
             )
             .child(category_tabs(&form))

@@ -213,6 +213,70 @@ fn picking_a_previewed_font_sets_the_type_tools_font(cx: &mut TestAppContext) {
     visual.update(|_, cx| assert_eq!(workspace.read(cx).state.options.text_style.font_family, other));
 }
 
+/// The Character section's weight menu lists the weights the text's font comes in, each drawn
+/// at that weight, and picking one sets the selected text's weight.
+#[gpui_kit::test]
+fn the_snapping_menu_shows_the_layout_grid_and_turns_snapping_choices_off(cx: &mut TestAppContext) {
+    let (workspace, visual) = open(cx);
+    crate::app_settings::update(|settings| settings.onboarded = true);
+    launch(&workspace, visual);
+    press_keys(visual, "escape");
+    render(visual);
+    let settings = |visual: &mut VisualTestContext| visual.update(|_, cx| workspace.read(cx).ui.settings.clone());
+    assert!(!settings(visual).show_grid && settings(visual).snap_to_center);
+
+    visual.update(|window, cx| window.click("canvas-snapping", cx));
+    render(visual);
+    visual.update(|window, cx| window.click("snap-layout-grid", cx));
+    render(visual);
+    assert!(settings(visual).show_grid);
+    assert!(crate::app_settings::load().show_grid, "the choice is kept for next time");
+
+    visual.update(|window, cx| window.click("canvas-snapping", cx));
+    render(visual);
+    visual.update(|window, cx| window.click("snap-to-center", cx));
+    render(visual);
+    assert!(!settings(visual).snap_to_center);
+    assert!(!visual.update(|_, cx| workspace.read(cx).ui.settings.snap_options().center_lines));
+}
+
+#[gpui_kit::test]
+fn picking_a_weight_from_the_menu_sets_the_texts_weight(cx: &mut TestAppContext) {
+    use canvas_core::document::{Content, Layer, TextLayer, TextStyle};
+    let (workspace, visual) = open(cx);
+    crate::app_settings::update(|settings| settings.onboarded = true);
+    launch(&workspace, visual);
+    press_keys(visual, "escape");
+    let id = visual.update(|_, cx| {
+        workspace.update(cx, |ws, cx| {
+            let id = ws.state.project.new_id();
+            let text = TextLayer { text: "Hi".into(), style: TextStyle::default(), placement: Default::default(), box_width: None, measured: Default::default() };
+            ws.state.doc_mut().layers.push(Layer::new(id, "Text", Content::Text(text)));
+            ws.state.selected = vec![id];
+            cx.notify();
+            id
+        })
+    });
+    render(visual);
+
+    visual.update(|window, cx| window.click("text-weight", cx));
+    render(visual);
+    let weight_of = |visual: &mut VisualTestContext| {
+        visual.update(|_, cx| match &workspace.read(cx).state.doc().layer(id).expect("the text layer").content {
+            Content::Text(text) => text.style.weight,
+            _ => unreachable!("the layer holds text"),
+        })
+    };
+    let current = weight_of(visual);
+    let other = [100u16, 200, 300, 400, 500, 600, 700, 800, 900]
+        .into_iter()
+        .find(|weight| *weight != current && showing(visual, format!("weight-{weight}")))
+        .expect("the font comes in more than one weight");
+    visual.update(|window, cx| window.click(format!("weight-{other}"), cx));
+    render(visual);
+    assert_eq!(weight_of(visual), other);
+}
+
 /// Renames the open document: an unsaved change that a saved file brings back.
 fn make_an_edit(workspace: &Entity<Workspace>, visual: &mut VisualTestContext, name: &str) {
     visual.update(|_, cx| {

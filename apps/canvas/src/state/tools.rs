@@ -8,6 +8,7 @@ use canvas_core::document::{Content, Layer, move_layer, transform_placement};
 use canvas_core::geom::{Affine, IRect, Rect, Vec2};
 use canvas_core::paint::{BrushEffect, BrushSettings, Stroke as BrushStroke, fill_gradient, fill_masked, spot_heal_offset};
 use canvas_core::selection::{self, Combine};
+use canvas_core::snap::{Snapped, snap_box};
 use canvas_core::vector::{Anchor, Contour, Geometry, Gradient, GradientStop, Paint, PathData, Placement, ShapeKind, VectorShape};
 use canvas_core::{Bitmap, Id, Mask, Rgba};
 
@@ -137,7 +138,10 @@ pub enum Interaction {
     /// Moving the selected layers. `unselect` is a layer Shift-clicked while already selected:
     /// it leaves the selection if the press ends without a move. `moved_by` is how far they have
     /// moved from `originals`, which lets the canvas reuse their pictures while they move.
-    Move { start: Vec2, originals: Vec<Layer>, unselect: Option<Id>, moved_by: Vec2 },
+    /// Moving layers: where the drag began, the layers as they were, a layer to take out of
+    /// the selection if the press turns out to be a click, how far they have moved, and the
+    /// box around them before the move (what snaps to the grid and the canvas's center).
+    Move { start: Vec2, originals: Vec<Layer>, unselect: Option<Id>, moved_by: Vec2, bounds: Option<Rect> },
     Paint { layer: Id, on_mask: bool, stroke: Box<BrushStroke>, origin: (i32, i32), working: Option<Bitmap> },
     Marquee { start: Vec2, end: Vec2, ellipse: bool, combine: Combine },
     Lasso { points: Vec<Vec2>, combine: Combine },
@@ -366,11 +370,19 @@ impl EditorState {
     pub fn drag(&mut self, point: Vec2, keys: Keys) {
         let Some(mut interaction) = self.interaction.take() else { return };
         match &mut interaction {
-            Interaction::Move { start, originals, moved_by, .. } => {
+            Interaction::Move { start, originals, moved_by, bounds, .. } => {
                 let mut offset = point - *start;
                 // Shift keeps the move straight across, down or diagonal.
                 if keys.shift {
                     offset = constrain(offset);
+                }
+                // Holding ⌘ moves freely, without snapping.
+                self.snapped = Snapped::default();
+                if !keys.command && let Some(bounds) = *bounds {
+                    let moved = Rect::new(bounds.x + offset.x, bounds.y + offset.y, bounds.width, bounds.height);
+                    let snapped = keep_on_line(snap_box(moved, self.doc().rect(), self.snap, self.snap_reach), offset, keys.shift);
+                    offset = offset + snapped.nudge;
+                    self.snapped = snapped;
                 }
                 *moved_by = offset;
                 let doc = self.doc_mut();
@@ -444,6 +456,7 @@ impl EditorState {
         let Some(interaction) = self.interaction.take() else { return Outcome::Nothing };
         match interaction {
             Interaction::Move { start: _, originals, unselect, .. } => {
+                self.snapped = Snapped::default();
                 let moved = originals.iter().any(|original| self.doc().layer(original.id) != Some(original));
                 if moved {
                     self.label = Some("Move");
@@ -515,6 +528,7 @@ impl EditorState {
 
     /// Ends a drag without finishing it (Escape, or undo during one).
     pub fn cancel_interaction(&mut self) {
+        self.snapped = Snapped::default();
         if let Some(Interaction::Move { originals, .. }) = self.interaction.take() {
             let doc = self.doc_mut();
             for original in originals {
@@ -558,7 +572,7 @@ impl EditorState {
             }
         }
         let originals: Vec<Layer> = self.selected.iter().filter_map(|id| self.doc().layer(*id).cloned()).filter(|layer| !layer.locked).collect();
-        self.interaction = Some(Interaction::Move { start: point, originals, unselect, moved_by: Vec2::ZERO });
+        self.interaction = Some(move_interaction(point, originals, unselect));
     }
 
     /// What a Move-tool click on layer `hit` (the deepest layer there) picks. With ⌘, that layer
@@ -1022,7 +1036,7 @@ impl EditorState {
                 if matches!(self.doc().layer(id).map(|layer| &layer.content), Some(Content::Vector(_))) {
                     // Dragging a shape's body moves it whole.
                     let originals = self.doc().layer(id).cloned().into_iter().collect();
-                    self.interaction = Some(Interaction::Move { start: point, originals, unselect: None, moved_by: Vec2::ZERO });
+                    self.interaction = Some(move_interaction(point, originals, None));
                 }
             }
             None => self.selected.clear(),
@@ -1486,6 +1500,29 @@ fn resize_rect(rect: Rect, edge: usize, by: Vec2) -> Rect {
     Rect::from_corners(Vec2::new(left, top), Vec2::new(right, bottom))
 }
 
+/// Starts moving `originals` from `start`, noting the box around them for snapping.
+fn move_interaction(start: Vec2, originals: Vec<Layer>, unselect: Option<Id>) -> Interaction {
+    let bounds = originals.iter().filter_map(Layer::bounds).reduce(Rect::union);
+    Interaction::Move { start, originals, unselect, moved_by: Vec2::ZERO, bounds }
+}
+
+/// With Shift held the move stays on its straight line, so only the axis it runs along may
+/// snap: a move straight across snaps across, one straight down snaps down, and a diagonal
+/// one doesn't snap at all. Without Shift, `snapped` is kept as it is.
+fn keep_on_line(snapped: Snapped, offset: Vec2, constrained: bool) -> Snapped {
+    if !constrained {
+        return snapped;
+    }
+    let across = offset.y == 0.0;
+    let down = offset.x == 0.0;
+    Snapped {
+        nudge: Vec2::new(if across { snapped.nudge.x } else { 0.0 }, if down { snapped.nudge.y } else { 0.0 }),
+        vertical: snapped.vertical.filter(|_| across),
+        horizontal: snapped.horizontal.filter(|_| down),
+        dead_center: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1581,6 +1618,48 @@ mod tests {
         state.press(Vec2::new(230.0, 230.0), shift, 1, 4.0);
         state.release();
         assert_eq!(state.selected, vec![left, apart]);
+    }
+
+    #[test]
+    fn a_moved_layer_snaps_to_dead_center_unless_command_is_held() {
+        use canvas_core::snap::{SnapOptions, Snapped};
+        let mut state = EditorState::new();
+        draw_rectangle(&mut state, Vec2::new(10.0, 10.0), Vec2::new(110.0, 110.0));
+        state.set_tool(Tool::Move);
+        state.snap = SnapOptions { grid: None, center_lines: true, dead_center: true };
+        state.snap_reach = 8.0;
+        let start = state.target_layer().unwrap().bounds().unwrap().center();
+        let middle = |state: &EditorState| state.target_layer().unwrap().bounds().unwrap().center();
+        // Dragged so its middle would be 3 left of and 4 below the document's middle (960, 540).
+        state.press(start, Keys::default(), 1, 4.0);
+        state.drag(Vec2::new(957.0, 544.0), Keys::default());
+        assert!(middle(&state).distance(Vec2::new(960.0, 540.0)) < 0.01, "{:?}", middle(&state));
+        assert!(state.snapped.dead_center);
+        // With ⌘ held, it goes exactly where it is dragged.
+        state.drag(Vec2::new(957.0, 544.0), Keys { command: true, ..Keys::default() });
+        assert!(middle(&state).distance(Vec2::new(957.0, 544.0)) < 0.01, "{:?}", middle(&state));
+        assert_eq!(state.snapped, Snapped::default());
+        state.release();
+        assert_eq!(state.snapped, Snapped::default(), "the guides go when the drag ends");
+    }
+
+    #[test]
+    fn a_shift_move_snaps_to_the_grid_only_along_its_line() {
+        use canvas_core::snap::SnapOptions;
+        let mut state = EditorState::new();
+        draw_rectangle(&mut state, Vec2::new(10.0, 10.0), Vec2::new(110.0, 110.0));
+        state.set_tool(Tool::Move);
+        state.snap = SnapOptions { grid: Some(60.0), center_lines: false, dead_center: false };
+        state.snap_reach = 8.0;
+        let before = state.target_layer().unwrap().bounds().unwrap();
+        // Straight across, the left edge lands 3 short of the grid line at 60 and is pulled onto it.
+        let shift = Keys { shift: true, ..Keys::default() };
+        state.press(Vec2::new(50.0, 50.0), shift, 1, 4.0);
+        state.drag(Vec2::new(50.0 + 60.0 - before.x - 3.0, 51.0), shift);
+        let after = state.target_layer().unwrap().bounds().unwrap();
+        assert!((after.x - 60.0).abs() < 0.01 && (after.y - before.y).abs() < 0.01, "{after:?}");
+        assert_eq!((state.snapped.vertical, state.snapped.horizontal), (Some(60.0), None));
+        state.release();
     }
 
     #[test]

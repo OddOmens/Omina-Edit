@@ -216,10 +216,10 @@ fn row(workspace: &Workspace, layer: &Layer, depth: usize, cx: &mut Context<Work
             .flex_col()
             .child(div().truncate().text_color(hsla(if layer.visible { color::TEXT } else { color::MUTED })).child(layer.name.clone()))
             .when(layer.blend != BlendMode::Normal || layer.opacity < 0.999, |name| {
-                name.child(div().truncate().text_size(px(size::SMALL_TEXT - 1.0)).text_color(hsla(color::MUTED)).child(format!("{} · {}%", layer.blend.name(), (layer.opacity * 100.0).round())))
+                name.child(div().truncate().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).child(format!("{} · {}%", layer.blend.name(), (layer.opacity * 100.0).round())))
             })
             // Its effects, so a group's or picture's effects show without selecting it.
-            .children(super::effects::summary(layer).map(|effects| div().truncate().text_size(px(size::SMALL_TEXT - 1.0)).text_color(hsla(color::ACCENT).opacity(0.8)).child(format!("fx  {effects}"))))
+            .children(super::effects::summary(layer).map(|effects| div().truncate().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::ACCENT).opacity(0.8)).child(format!("fx  {effects}"))))
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                 if event.click_count >= 2 {
                     cx.stop_propagation();
@@ -307,18 +307,12 @@ fn row(workspace: &Workspace, layer: &Layer, depth: usize, cx: &mut Context<Work
 
 /// The blend mode menu for the selected layers.
 fn blend_menu(workspace: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
-    use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::button::Button;
     use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
     use gpui_kit::component::Disableable as _;
     let current = workspace.state.target_layer().map_or(BlendMode::Normal, |layer| layer.blend);
     let enabled = workspace.state.target_layer().is_some();
     let target = cx.weak_entity();
-    Button::new("layers-blend")
-        .outline()
-        .xsmall()
-        .label(current.name())
-        .dropdown_caret(true)
+    super::chrome::dropdown("layers-blend", current.name())
         .disabled(!enabled)
         .dropdown_menu(move |menu, _, _| {
             let mut menu = menu.scrollable(true).max_h(px(480.0));

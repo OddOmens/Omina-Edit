@@ -166,6 +166,22 @@ impl TextEngine {
         names
     }
 
+    /// The weights (100 to 900) the installed family `family` comes in, lightest first. A
+    /// variable font reports only the weights of its named faces. Empty if the family isn't
+    /// installed.
+    pub fn weights(&mut self, family: &str) -> Vec<u16> {
+        let mut weights: Vec<u16> = self
+            .fonts()
+            .db()
+            .faces()
+            .filter(|face| face.families.iter().any(|(name, _)| name == family))
+            .map(|face| face.weight.0)
+            .collect();
+        weights.sort_unstable();
+        weights.dedup();
+        weights
+    }
+
     fn attrs(style: &TextStyle) -> Attrs<'_> {
         Attrs::new()
             .family(Family::Name(&style.font_family))

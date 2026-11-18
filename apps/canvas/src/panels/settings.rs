@@ -1,7 +1,7 @@
 //! The Settings dialog (⌘,), laid out as Studio's: sections in a menu on the left, each a page
 //! of cards. General (start, undo and the welcome setup), Appearance (theme and accent), Canvas
-//! (transparency and pixel grid), Tools & Features, Brushes, Design Assistant, Keyboard
-//! Shortcuts and About.
+//! (transparency, the pixel and layout grids, and snapping), Tools & Features, Brushes, Design
+//! Assistant, Keyboard Shortcuts and About.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -126,6 +126,8 @@ fn change(shown: &SharedShown, workspace: &WeakEntity<Workspace>, window: &mut W
     if settings.features_off != before || settings.shortcuts != keys_before {
         crate::workspace::rebind_keys(cx);
     }
+    // The View menu shows some of these settings (the grids, snapping) with check marks.
+    crate::workspace::refresh_menus(cx);
     workspace
         .update(cx, |this, cx| {
             this.use_settings(settings);
@@ -141,7 +143,7 @@ fn page(section: Section) -> gpui_kit::Div {
         .flex()
         .flex_col()
         .gap_1()
-        .child(div().text_size(px(18.0)).text_color(hsla(color::TEXT)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(section.name()))
+        .child(div().text_size(px(size::PAGE_TITLE_TEXT)).text_color(hsla(color::TEXT)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(section.name()))
         .child(div().text_size(px(size::TEXT)).text_color(hsla(color::MUTED)).child(section.about()))
 }
 
@@ -174,7 +176,7 @@ fn setting(name: impl Into<SharedString>, about: impl Into<SharedString>, contro
                 .flex()
                 .flex_col()
                 .gap_0p5()
-                .child(div().text_size(px(size::TEXT + 1.0)).text_color(hsla(color::TEXT)).child(name.into()))
+                .child(div().text_size(px(size::LARGE_TEXT)).text_color(hsla(color::TEXT)).child(name.into()))
                 .child(div().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child(about.into())),
         )
         .child(div().flex_none().flex().items_center().gap_1p5().child(control))
@@ -192,7 +194,7 @@ fn switch(id: &'static str, on: bool, shown: &SharedShown, workspace: &WeakEntit
 fn menu<T: Clone + PartialEq + 'static>(id: &'static str, choices: Vec<(String, T)>, current: T, shown: &SharedShown, workspace: &WeakEntity<Workspace>, set: fn(&mut AppSettings, T)) -> impl IntoElement {
     let label = choices.iter().find(|(_, value)| *value == current).map_or_else(|| "Custom".to_owned(), |(label, _)| label.clone());
     let (shown, workspace) = (shown.clone(), workspace.clone());
-    Button::new(id).outline().small().label(label).dropdown_caret(true).dropdown_menu(move |menu, _, _| {
+    crate::panels::chrome::dropdown(id, label).dropdown_menu(move |menu, _, _| {
         choices.iter().fold(menu, |menu, (label, value)| {
             let (shown, workspace, value) = (shown.clone(), workspace.clone(), value.clone());
             let checked = value == current;
@@ -329,11 +331,20 @@ fn appearance(shown: &SharedShown, workspace: &WeakEntity<Workspace>) -> gpui_ki
 fn canvas_page(shown: &SharedShown, workspace: &WeakEntity<Workspace>) -> gpui_kit::Div {
     let now = shown.borrow().settings.clone();
     let choices: Vec<(String, Transparency)> = Transparency::ALL.into_iter().map(|choice| (choice.name().to_owned(), choice)).collect();
+    let grid_sizes: Vec<(String, u32)> = crate::app_settings::GRID_SIZES.into_iter().map(|size| (format!("{size} px"), size)).collect();
     div()
         .child(page(Section::Canvas))
         .child(card(vec![
             setting("Transparency", "What shows under the transparent parts of a document.", menu("settings-transparency", choices, now.transparency, shown, workspace, |settings, value| settings.transparency = value)),
             setting("Pixel grid", "Lines between pixels when zoomed in past 800%.", switch("settings-pixel-grid", now.pixel_grid, shown, workspace, |settings, on| settings.pixel_grid = on)),
+        ]))
+        .child(group_title("Layout grid and snapping"))
+        .child(card(vec![
+            setting("Layout grid", "Lines across the document to line layers up with (⌘').", switch("settings-show-grid", now.show_grid, shown, workspace, |settings, on| settings.show_grid = on)),
+            setting("Grid size", "How far apart the grid's lines are.", menu("settings-grid-size", grid_sizes, now.grid_size, shown, workspace, |settings, size| settings.grid_size = size)),
+            setting("Snap to grid", "Moved layers line up with the grid while it shows.", switch("settings-snap-grid", now.snap_to_grid, shown, workspace, |settings, on| settings.snap_to_grid = on)),
+            setting("Snap to center lines", "Moved layers center across or down the document.", switch("settings-snap-center", now.snap_to_center, shown, workspace, |settings, on| settings.snap_to_center = on)),
+            setting("Snap to dead center", "Moved layers settle in the exact middle of the document. Hold ⌘ while dragging to move without snapping.", switch("settings-snap-dead-center", now.snap_to_dead_center, shown, workspace, |settings, on| settings.snap_to_dead_center = on)),
         ]))
 }
 
@@ -415,7 +426,7 @@ fn assistant_page(shown: &SharedShown, workspace: &WeakEntity<Workspace>, name: 
                 .flex()
                 .flex_col()
                 .gap_0p5()
-                .child(div().id("settings-assistant-name").text_size(px(16.0)).text_color(hsla(color::TEXT)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(shared.shown_name()).test_support())
+                .child(div().id("settings-assistant-name").text_size(px(size::TITLE_TEXT)).text_color(hsla(color::TEXT)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(shared.shown_name()).test_support())
                 .child(div().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child("Reads the open document (its text, layout, pictures and layers) and suggests fixes you can make in a click, and answers questions about it and about Omina Edit from a list of ready-written answers. Rules and word matching, not AI.")),
         )
         .into_any_element();
@@ -910,7 +921,7 @@ fn section_menu(shown: &SharedShown) -> gpui_kit::Div {
             .gap_2()
             .rounded(px(6.0))
             .cursor_pointer()
-            .text_size(px(size::TEXT + 0.5))
+            .text_size(px(size::LARGE_TEXT))
             .text_color(hsla(if selected { color::TEXT } else { color::MUTED }))
             .when(selected, |item| item.bg(hsla(color::ROW_SELECTED)))
             .hover(|style| style.bg(hsla(color::HOVER)).text_color(hsla(color::TEXT)))

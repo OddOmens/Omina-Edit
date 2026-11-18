@@ -28,6 +28,7 @@ pub mod morph;
 pub mod paint;
 pub mod pdf;
 pub mod selection;
+pub mod snap;
 pub mod svg;
 pub mod templates;
 pub mod vector_pdf;

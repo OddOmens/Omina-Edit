@@ -165,7 +165,7 @@ pub fn render(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> impl In
                         .test_support(),
                 )
                 .child(div().px_0p5().text_size(px(size::SMALL_TEXT)).child(device.name()))
-                .child(div().px_0p5().text_size(px(size::SMALL_TEXT - 1.0)).text_color(hsla(color::MUTED)).child(format!("Screen {width} × {height}")))
+                .child(div().px_0p5().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).child(format!("Screen {width} × {height}")))
         })
         .collect();
     let body = div()

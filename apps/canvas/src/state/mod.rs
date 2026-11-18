@@ -170,6 +170,14 @@ pub struct EditorState {
     pub notices: Vec<String>,
     /// The brands, colors and text styles shared with Studio, as last read or saved.
     pub libraries: canvas_core::library::Libraries,
+    /// What a moved layer snaps to (the grid, the center lines, dead center), set by the
+    /// canvas from the View menu's choices before each drag step.
+    pub snap: canvas_core::snap::SnapOptions,
+    /// How near, in document pixels, a line must be to pull a moved layer onto it. The canvas
+    /// sets it from the zoom, so the pull is the same few screen points at any magnification.
+    pub snap_reach: f32,
+    /// Where the move in progress snapped, for drawing guide lines; empty when it didn't.
+    pub snapped: canvas_core::snap::Snapped,
 }
 
 use history::History;
@@ -213,6 +221,9 @@ impl EditorState {
             free_transform: None,
             selected_anchor: None,
             renderer: Renderer::new(),
+            snap: canvas_core::snap::SnapOptions::default(),
+            snap_reach: 0.0,
+            snapped: canvas_core::snap::Snapped::default(),
             notices: Vec::new(),
             libraries: Default::default(),
         };

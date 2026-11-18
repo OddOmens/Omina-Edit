@@ -176,6 +176,16 @@ pub struct AppSettings {
     pub history_states: usize,
     /// Show the pixel grid when zoomed in to 800% or more.
     pub pixel_grid: bool,
+    /// Show the layout grid over the document (View ▸ Layout Grid).
+    pub show_grid: bool,
+    /// The layout grid's spacing, in document pixels.
+    pub grid_size: u32,
+    /// Whether moved layers snap to the layout grid's lines while it is shown.
+    pub snap_to_grid: bool,
+    /// Whether moved layers snap to the document's vertical and horizontal center lines.
+    pub snap_to_center: bool,
+    /// Whether moved layers snap to the document's exact center, on both axes at once.
+    pub snap_to_dead_center: bool,
     /// The JPEG quality Export starts at.
     pub jpeg_quality: u8,
     /// The folder Open and Export start in.
@@ -211,6 +221,25 @@ pub struct AppSettings {
     pub last_update_check: u64,
 }
 
+/// The layout grid's spacing until another is picked, in document pixels. At 60, grid lines
+/// run through the middle of the common document sizes (1920 × 1080, 1080 × 1080, 1080 × 1920).
+pub const DEFAULT_GRID_SIZE: u32 = 60;
+
+/// The grid spacings offered in Settings ▸ Canvas, in document pixels.
+pub const GRID_SIZES: [u32; 8] = [8, 10, 20, 30, 40, 60, 100, 120];
+
+impl AppSettings {
+    /// What a moved layer snaps to, from the View menu's choices. The grid only pulls while it
+    /// is shown, so a layer never jumps to lines that can't be seen.
+    pub fn snap_options(&self) -> canvas_core::snap::SnapOptions {
+        canvas_core::snap::SnapOptions {
+            grid: (self.show_grid && self.snap_to_grid && self.grid_size > 0).then_some(self.grid_size as f32),
+            center_lines: self.snap_to_center,
+            dead_center: self.snap_to_dead_center,
+        }
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -226,6 +255,11 @@ impl Default for AppSettings {
             brushes: default_brushes(),
             history_states: 50,
             pixel_grid: true,
+            show_grid: false,
+            grid_size: DEFAULT_GRID_SIZE,
+            snap_to_grid: true,
+            snap_to_center: true,
+            snap_to_dead_center: true,
             jpeg_quality: 90,
             last_folder: None,
             tool_mode: crate::panels::toolbar::ToolMode::default(),

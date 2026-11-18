@@ -164,7 +164,7 @@ fn card(index: usize, template: &Template, picture: Option<Arc<RenderImage>>, cx
                 .test_support(),
         )
         .child(div().px_0p5().text_size(px(size::SMALL_TEXT)).truncate().child(template.name))
-        .child(div().px_0p5().text_size(px(size::SMALL_TEXT - 1.0)).text_color(hsla(color::MUTED)).child(size_note))
+        .child(div().px_0p5().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).child(size_note))
 }
 
 /// The blank sizes from the New Document dialog, as small chips under their group names.
@@ -187,7 +187,7 @@ fn blank_sizes(cx: &mut Context<Workspace>) -> impl IntoElement + use<> {
                     cx.notify();
                 }))
                 .child(div().text_size(px(size::SMALL_TEXT)).child(name))
-                .child(div().text_size(px(size::SMALL_TEXT - 1.0)).text_color(hsla(color::MUTED)).child(format!("{width} × {height}")))
+                .child(div().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).child(format!("{width} × {height}")))
                 .test_support()
         });
         list = list.child(div().mt_1().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child(*group)).child(div().flex().flex_wrap().gap_1().children(chips));

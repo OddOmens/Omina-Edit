@@ -253,7 +253,7 @@ fn gradient_controls(id: canvas_core::Id, gradient: &Gradient, _workspace: &Work
 
 fn text_card(layer: &Layer, text: &canvas_core::document::TextLayer, workspace: &mut Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     let id = layer.id;
-    let font = super::options::font_menu("text-font", text.style.font_family.clone(), super::options::FontMenuPlace::Panel, |this, family| {
+    let font = super::options::font_menu("text-font", text.style.font_family.clone(), |this, family| {
         let ids = this.state.selected.clone();
         for id in ids {
             this.state.edit_layer(id, "Font", |layer| {
@@ -263,7 +263,12 @@ fn text_card(layer: &Layer, text: &canvas_core::document::TextLayer, workspace: 
             });
         }
     }, workspace, cx);
-    let weights = [(300u16, "Light"), (400, "Regular"), (500, "Medium"), (700, "Bold"), (900, "Black")];
+    let weight = super::options::weight_menu("text-weight", text.style.font_family.clone(), text.style.weight, |this, weight| {
+        let ids = this.state.selected.clone();
+        for id in ids {
+            edit_text(this, id, |text| text.style.weight = weight);
+        }
+    }, cx);
     let aligns = [(TextAlign::Left, "Left"), (TextAlign::Center, "Center"), (TextAlign::Right, "Right")];
     let paragraph = text.box_width.is_some();
     let body = div()
@@ -271,7 +276,7 @@ fn text_card(layer: &Layer, text: &canvas_core::document::TextLayer, workspace: 
         .flex_col()
         .gap_1()
         .child(row("Font", font))
-        .child(row("Weight", segmented(&format!("text-weight-{}", id.0), &weights, text.style.weight, move |this, weight| edit_text(this, id, |text| text.style.weight = weight), cx)))
+        .child(row("Weight", weight))
         .child(row("Size", value_field(FieldTarget::FontSize(id), workspace, cx)))
         .child(row("Leading", value_field(FieldTarget::Leading(id), workspace, cx)))
         .child(row("Tracking", value_field(FieldTarget::Tracking(id), workspace, cx)))
@@ -387,7 +392,7 @@ pub(super) fn adjustment_body(at: AdjustmentAt, adjustment: &Adjustment, workspa
         Adjustment::GradientMap { gradient, reverse } => {
             let swatches = div().flex().gap_1().children(gradient.stops.iter().map(|stop| div().size(px(18.0)).rounded(px(3.0)).border_1().border_color(hsla(color::HAIRLINE)).bg(gpui_kit::rgba(stop.color.to_rgba_u32()))));
             use gpui_kit::component::Sizable as _;
-            let colors = gpui_kit::component::button::Button::new(name("map-colors")).outline().xsmall().label("Use Foreground → Background").on_click(cx.listener(move |this, _, _, cx| {
+            let colors = gpui_kit::component::button::Button::new(name("map-colors")).outline().small().label("Use Foreground → Background").on_click(cx.listener(move |this, _, _, cx| {
                 let (from, to) = (this.state.colors.foreground, this.state.colors.background);
                 edit_adjustment(this, at, |adjustment| {
                     if let Adjustment::GradientMap { gradient, .. } = adjustment {
@@ -507,7 +512,7 @@ fn background_card(layer: &Layer, workspace: &Workspace, cx: &mut Context<Worksp
     }
     use gpui_kit::component::Sizable as _;
     use gpui_kit::component::button::Button;
-    let button = Button::new("remove-background").outline().xsmall().label("Remove Background").on_click(cx.listener(|this, _, window, cx| this.remove_background(window, cx)));
+    let button = Button::new("remove-background").outline().small().label("Remove Background").on_click(cx.listener(|this, _, window, cx| this.remove_background(window, cx)));
     let body = div()
         .flex()
         .flex_col()
@@ -521,7 +526,7 @@ fn background_card(layer: &Layer, workspace: &Workspace, cx: &mut Context<Worksp
 fn replace_button(cx: &mut Context<Workspace>) -> AnyElement {
     use gpui_kit::component::Sizable as _;
     use gpui_kit::component::button::Button;
-    Button::new("frame-replace").outline().xsmall().label("Replace Image…").on_click(cx.listener(|this, _, window, cx| this.place(window, cx))).into_any_element()
+    Button::new("frame-replace").outline().small().label("Replace Image…").on_click(cx.listener(|this, _, window, cx| this.place(window, cx))).into_any_element()
 }
 
 /// An image frame's card (for the frame or the picture in it): how the picture sits (Fill,

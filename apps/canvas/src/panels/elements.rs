@@ -190,7 +190,7 @@ fn tile(index: usize, name: &'static str, picture: Option<Arc<RenderImage>>, cx:
                 .hover(|style| style.border_color(hsla(color::ACCENT)))
                 .children(picture.map(|picture| img(picture).size_full())),
         )
-        .child(div().text_size(px(10.5)).text_color(hsla(color::MUTED)).truncate().child(name))
+        .child(div().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).truncate().child(name))
         .test_support()
 }
 

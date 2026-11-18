@@ -96,7 +96,7 @@ fn card(index: usize, preset: &BrushPreset, picked: bool, picture: Option<Arc<Re
             }
         }))
         .child(div().h(px(SAMPLE_HEIGHT as f32 / 2.0)).w_full().rounded(px(5.0)).overflow_hidden().children(picture.map(|picture| img(picture).size_full().object_fit(ObjectFit::Cover))))
-        .child(div().px_0p5().flex().items_center().justify_between().gap_1().child(div().truncate().text_size(px(size::SMALL_TEXT)).text_color(hsla(if picked { color::TEXT } else { color::MUTED })).child(preset.name.clone())).child(div().flex_none().text_size(px(size::SMALL_TEXT - 1.0)).text_color(hsla(color::MUTED)).child(format!("{}", brush.size.round()))))
+        .child(div().px_0p5().flex().items_center().justify_between().gap_1().child(div().truncate().text_size(px(size::SMALL_TEXT)).text_color(hsla(if picked { color::TEXT } else { color::MUTED })).child(preset.name.clone())).child(div().flex_none().text_size(px(size::CAPTION_TEXT)).text_color(hsla(color::MUTED)).child(format!("{}", brush.size.round()))))
         .test_support()
         .into_any_element()
 }
