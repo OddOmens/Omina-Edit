@@ -189,17 +189,19 @@ fn font_row(id: String, label: String, family: String, weight: u16) -> impl Into
         .test_support()
 }
 
-/// The font menu: every installed family in alphabetical order (loaded the first time it opens).
-/// The button shows the current family in its own typeface, and each family in the list is drawn
-/// in itself, so the fonts can be compared without trying them on the text.
+/// The font menu: favorite fonts first, then the fonts saved to each brand in the libraries,
+/// then every installed family in alphabetical order (loaded the first time it opens). The
+/// button shows the current family in its own typeface, and each family in the list is drawn in
+/// itself, so the fonts can be compared without trying them on the text. The star on a row
+/// makes that font a favorite, or stops it being one, without choosing it.
 pub fn font_menu(id: &'static str, current: String, apply: fn(&mut Workspace, String), workspace: &mut Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     use gpui_kit::component::Sizable as _;
     use gpui_kit::component::button::Button;
-    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+    use gpui_kit::component::menu::DropdownMenu as _;
     if workspace.ui.font_families.is_empty() {
         workspace.ui.font_families = workspace.state.renderer.text.families();
     }
-    let families = workspace.ui.font_families.clone();
+    let sections = font_sections(workspace);
     let target = cx.weak_entity();
     let shown = div().min_w_0().text_ellipsis().text_size(px(FONT_BUTTON_TEXT)).font_family(current.clone()).child(current.clone());
     Button::new(id)
@@ -208,24 +210,115 @@ pub fn font_menu(id: &'static str, current: String, apply: fn(&mut Workspace, St
         .child(shown)
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
-            let menu = menu.scrollable(true).max_h(px(420.0)).min_w(px(FONT_MENU_WIDTH)).max_w(px(FONT_MENU_WIDTH));
-            families.iter().fold(menu, |menu, family| {
-                let (target, family) = (target.clone(), family.clone());
-                let checked = family == current;
-                let preview = family.clone();
-                let item = PopupMenuItem::element(move |_, _| font_row(format!("font-{preview}"), preview.clone(), preview.clone(), 400));
-                menu.item(item.checked(checked).on_click(move |_, _, cx| {
-                    let family = family.clone();
-                    target
-                        .update(cx, |this, cx| {
-                            apply(this, family);
-                            cx.notify();
-                        })
-                        .ok();
-                }))
-            })
+            let mut menu = menu.scrollable(true).max_h(px(420.0)).min_w(px(FONT_MENU_WIDTH)).max_w(px(FONT_MENU_WIDTH));
+            let named = sections.len() > 1;
+            for (index, section) in sections.iter().enumerate() {
+                if named {
+                    if index > 0 {
+                        menu = menu.separator();
+                    }
+                    menu = menu.label(section.title.clone());
+                }
+                for family in &section.families {
+                    menu = menu.item(font_item(&section.key, family, family == &current, apply, target.clone()));
+                }
+            }
+            menu
         })
         .into_any_element()
+}
+
+/// A group of fonts in the font menu, such as Favorites or a brand's fonts.
+struct FontSection {
+    /// Shown above the group's fonts.
+    title: String,
+    /// Starts the ids of the group's rows, so a font listed in two groups has a different id in
+    /// each. The full list has none, so its rows are "font-<family>".
+    key: String,
+    families: Vec<String>,
+}
+
+/// The font menu's groups: Favorites and each brand that has fonts (when there are any), and
+/// then All Fonts.
+fn font_sections(workspace: &Workspace) -> Vec<FontSection> {
+    let sorted = |families: &[String]| {
+        let mut families = families.to_vec();
+        families.sort_by_key(|family| family.to_lowercase());
+        families
+    };
+    let libraries = &workspace.state.libraries;
+    let mut sections = Vec::new();
+    if !libraries.favorite_fonts.is_empty() {
+        sections.push(FontSection { title: "Favorites".into(), key: "favorite-".into(), families: sorted(&libraries.favorite_fonts) });
+    }
+    for brand in libraries.brands.iter().filter(|brand| !brand.fonts.is_empty()) {
+        sections.push(FontSection { title: brand.name.clone(), key: format!("brand-{}-", brand.id.0), families: sorted(&brand.fonts) });
+    }
+    sections.push(FontSection { title: "All Fonts".into(), key: String::new(), families: workspace.ui.font_families.clone() });
+    sections
+}
+
+/// One font in the font menu: its name drawn in itself, and the favorite star. Clicking the row
+/// chooses the font; clicking the star only stars or unstars it.
+fn font_item(key: &str, family: &str, checked: bool, apply: fn(&mut Workspace, String), target: gpui_kit::WeakEntity<Workspace>) -> gpui_kit::component::menu::PopupMenuItem {
+    use gpui_kit::component::menu::PopupMenuItem;
+    let row_id = format!("font-{key}{family}");
+    let family = family.to_owned();
+    let (row_target, star_family) = (target.clone(), family.clone());
+    let item = PopupMenuItem::element(move |_, cx| {
+        let favorite = row_target.upgrade().is_some_and(|workspace| workspace.read(cx).state.libraries.is_favorite_font(&star_family));
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .min_w_0()
+            .group("font-row")
+            .child(div().flex_1().min_w_0().child(font_row(row_id.clone(), star_family.clone(), star_family.clone(), 400)))
+            .child(favorite_star(format!("{row_id}-star"), &star_family, favorite, row_target.clone()))
+    });
+    item.checked(checked).on_click(move |_, _, cx| {
+        let family = family.clone();
+        target
+            .update(cx, |this, cx| {
+                apply(this, family);
+                cx.notify();
+            })
+            .ok();
+    })
+}
+
+/// The star beside a font in the font menu: in the accent color for a favorite, and otherwise
+/// faint, brighter while the row is pointed at. Clicking it changes the shared libraries file,
+/// so the font is a favorite in Omina Motion too.
+fn favorite_star(id: String, family: &str, favorite: bool, target: gpui_kit::WeakEntity<Workspace>) -> impl IntoElement {
+    use gpui_kit::prelude::FluentBuilder as _;
+    let family = family.to_owned();
+    let tooltip = if favorite { "Remove from favorites" } else { "Add to favorites" };
+    div()
+        .id(ElementId::Name(id.into()))
+        .flex_none()
+        .size(px(22.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .when(!favorite, |star| star.opacity(0.3).group_hover("font-row", |style| style.opacity(0.7)))
+        .hover(|style| style.bg(hsla(color::HOVER)).opacity(1.0))
+        .child(Icon::new(IconName::Star).size(px(13.0)).text_color(if favorite { hsla(color::ACCENT) } else { hsla(color::MUTED) }))
+        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip).build(window, cx))
+        // The row underneath would choose the font and close the menu; the star does neither.
+        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            target
+                .update(cx, |this, cx| {
+                    super::libraries::edit(this, false, |libraries| libraries.toggle_favorite_font(&family));
+                    cx.notify();
+                })
+                .ok();
+        })
+        .test_support()
 }
 
 /// The weight menu: the weights `family` comes in, lightest first, each drawn in the font at that
@@ -388,7 +481,12 @@ pub fn render(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> impl In
         }
         Tool::Type => {
             let family = workspace.state.options.text_style.font_family.clone();
-            items.push(font_menu("options-font", family, |this, family| this.state.options.text_style.font_family = family, workspace, cx));
+            items.push(font_menu("options-font", family, |this, family| {
+                let weight = this.state.renderer.text.nearest_weight(&family, this.state.options.text_style.weight);
+                let style = &mut this.state.options.text_style;
+                style.font_family = family;
+                style.weight = weight;
+            }, workspace, cx));
             items.push(hint("Click to type; drag to make a text box that wraps. ⌘Return or Escape finishes."));
         }
         Tool::Shape => {

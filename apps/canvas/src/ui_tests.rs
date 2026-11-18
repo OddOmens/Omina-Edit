@@ -213,8 +213,56 @@ fn picking_a_previewed_font_sets_the_type_tools_font(cx: &mut TestAppContext) {
     visual.update(|_, cx| assert_eq!(workspace.read(cx).state.options.text_style.font_family, other));
 }
 
-/// The Character section's weight menu lists the weights the text's font comes in, each drawn
-/// at that weight, and picking one sets the selected text's weight.
+/// The star in the font menu makes a font a favorite without choosing it, and favorites and a
+/// brand's fonts are listed above all the others.
+#[gpui_kit::test]
+fn favorite_and_brand_fonts_come_first_in_the_font_menu(cx: &mut TestAppContext) {
+    let _turn = crate::library_store::tests::ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _ = std::fs::remove_file(crate::library_store::library_path());
+    let (workspace, visual) = open(cx);
+    crate::app_settings::update(|settings| settings.onboarded = true);
+    launch(&workspace, visual);
+    press_keys(visual, "escape");
+    visual.update(|_, cx| workspace.update(cx, |ws, _| ws.state.set_tool(crate::state::tools::Tool::Type)));
+    render(visual);
+    let font = |visual: &mut VisualTestContext| visual.update(|_, cx| workspace.read(cx).state.options.text_style.font_family.clone());
+    let libraries = |visual: &mut VisualTestContext| visual.update(|_, cx| workspace.read(cx).state.libraries.clone());
+
+    visual.update(|window, cx| window.click("options-font", cx));
+    render(visual);
+    let current = font(visual);
+    let other = visual.update(|_, cx| workspace.read(cx).ui.font_families.iter().find(|family| **family != current).cloned()).expect("more than one font is installed");
+    assert!(!showing(visual, format!("font-favorite-{other}")), "no favorites yet");
+    visual.update(|window, cx| window.click(format!("font-{other}-star"), cx));
+    render(visual);
+    assert_eq!(libraries(visual).favorite_fonts, [other.clone()], "the star made it a favorite");
+    assert_eq!(font(visual), current, "the star doesn't choose the font");
+
+    // Reopened, the menu lists it under Favorites, and choosing it there sets the font.
+    visual.update(|window, cx| window.press("escape", cx));
+    render(visual);
+    visual.update(|window, cx| window.click("options-font", cx));
+    render(visual);
+    assert!(showing(visual, format!("font-favorite-{other}")));
+    visual.update(|window, cx| window.click(format!("font-favorite-{other}"), cx));
+    render(visual);
+    assert_eq!(font(visual), other);
+
+    // A brand's + adds the Type tool's font, which the menu then lists under the brand.
+    let brand = visual.update(|_, cx| workspace.update(cx, |ws, _| crate::panels::libraries::edit(ws, false, |libraries| libraries.add_brand("Acme")))).expect("saved");
+    visual.update(|window, cx| window.click("rail-libraries", cx));
+    render(visual);
+    visual.update(|window, cx| window.click(format!("library-add-font:{}", brand.0), cx));
+    render(visual);
+    assert_eq!(libraries(visual).brand(brand).map(|brand| brand.fonts.clone()), Some(vec![other.clone()]));
+    visual.update(|window, cx| window.click("options-font", cx));
+    render(visual);
+    assert!(showing(visual, format!("font-brand-{}-{other}", brand.0)));
+    let _ = std::fs::remove_file(crate::library_store::library_path());
+}
+
+/// The canvas bar's Snapping menu shows the layout grid and turns each kind of snapping off,
+/// and the choices are kept for next time.
 #[gpui_kit::test]
 fn the_snapping_menu_shows_the_layout_grid_and_turns_snapping_choices_off(cx: &mut TestAppContext) {
     let (workspace, visual) = open(cx);
@@ -240,6 +288,8 @@ fn the_snapping_menu_shows_the_layout_grid_and_turns_snapping_choices_off(cx: &m
     assert!(!visual.update(|_, cx| workspace.read(cx).ui.settings.snap_options().center_lines));
 }
 
+/// The Character section's weight menu lists the weights the text's font comes in, each drawn
+/// at that weight, and picking one sets the selected text's weight.
 #[gpui_kit::test]
 fn picking_a_weight_from_the_menu_sets_the_texts_weight(cx: &mut TestAppContext) {
     use canvas_core::document::{Content, Layer, TextLayer, TextStyle};

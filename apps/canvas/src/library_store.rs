@@ -41,7 +41,7 @@ pub fn studio_folder() -> PathBuf {
     }
 }
 
-fn library_path() -> PathBuf {
+pub(crate) fn library_path() -> PathBuf {
     studio_folder().join("libraries.json")
 }
 
@@ -142,12 +142,13 @@ pub fn update<T>(always_back_up: bool, change: impl FnOnce(&mut Libraries) -> T)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use canvas_core::Rgba;
 
-    /// The tests share one folder, so they run one at a time.
-    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// The tests share one folder (the screen tests that change the libraries too), so they run
+    /// one at a time.
+    pub(crate) static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn changes_apply_to_the_file_as_it_is_now_and_back_up_before_deletions() {

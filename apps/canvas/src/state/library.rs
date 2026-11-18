@@ -84,6 +84,25 @@ impl EditorState {
         }
     }
 
+    /// Sets the font of those of `layers` that are text to `family`. Each one's weight moves to
+    /// the nearest weight the new font comes in, so the Weight menu shows what is drawn. Returns
+    /// how many were text.
+    pub fn set_font(&mut self, family: &str, layers: &[Id]) -> usize {
+        let mut count = 0;
+        for &layer in layers {
+            let Some(weight) = self.text_style_of(layer).map(|style| style.weight) else { continue };
+            let weight = self.renderer.text.nearest_weight(family, weight);
+            self.edit_layer(layer, "Font", |layer| {
+                if let Content::Text(text) = &mut layer.content {
+                    text.style.font_family = family.to_owned();
+                    text.style.weight = weight;
+                }
+            });
+            count += 1;
+        }
+        count
+    }
+
     /// Uses library text style `id` on those of `layers` that are text, linked. Returns how
     /// many took it.
     pub fn apply_text_style(&mut self, id: LinkId, layers: &[Id]) -> usize {

@@ -1,6 +1,7 @@
 //! The Libraries panel, the same as Studio's and sharing its libraries: brands (folders)
-//! holding colors and text styles that every project in either app can use. Clicking a color
-//! or text style uses it on the selected layers, linked, so changing it here (or in Studio)
+//! holding colors, text styles and fonts that every project in either app can use. A brand's
+//! fonts are listed at the top of the font menus. Clicking a color or text style uses it on the
+//! selected layers, linked, so changing it here (or in Studio)
 //! later changes it everywhere it is used. A color's chip opens the color picker to change the
 //! library color itself.
 //!
@@ -189,7 +190,7 @@ fn brand_section(brand: &Brand, workspace: &Workspace, cx: &mut Context<Workspac
         .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(12.0)).text_color(hsla(color::MUTED)))
         .child(Icon::new(if open { IconName::FolderOpen } else { IconName::Folder }).size(px(15.0)).text_color(hsla(color::MUTED)))
         .child(name_label(id, &brand.name, workspace, cx))
-        .child(div().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child(format!("{}", brand.colors.len() + brand.text_styles.len())))
+        .child(div().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child(format!("{}", brand.colors.len() + brand.text_styles.len() + brand.fonts.len())))
         .child({
             let brand = brand.clone();
             icon_button(ElementId::Name(format!("library-delete-brand:{}", id.0).into()), IconName::Trash, "Delete brand and everything in it", false, cx.listener(move |_, _, window, cx| {
@@ -298,7 +299,69 @@ fn brand_section(brand: &Brand, workspace: &Workspace, cx: &mut Context<Workspac
                 .test_support(),
         );
     }
+    section = fonts_section(section, brand, text_layer, workspace, cx);
     section.child(div().h(px(6.0)))
+}
+
+/// A brand's Fonts: each family drawn in itself. Clicking one sets the selected text's font; +
+/// adds the font of the selected text layer (or, with none selected, the Type tool's font).
+fn fonts_section(mut section: Div, brand: &Brand, text_layer: Option<canvas_core::Id>, workspace: &Workspace, cx: &mut Context<Workspace>) -> Div {
+    let id = brand.id;
+    let font_to_add = match text_layer {
+        Some(layer) => workspace.state.text_style_of(layer).map(|style| style.font_family.clone()),
+        None => Some(workspace.state.options.text_style.font_family.clone()),
+    };
+    let already_there = font_to_add.as_ref().is_some_and(|family| brand.fonts.contains(family));
+    let tooltip = match &font_to_add {
+        Some(family) if already_there => format!("{family} is already in this brand"),
+        Some(family) => format!("Add {family}, the selected text's font"),
+        None => "Select a text layer to add its font".to_owned(),
+    };
+    let add_font = icon_button(ElementId::Name(format!("library-add-font:{}", id.0).into()), IconName::Plus, tooltip, false, cx.listener(move |this, _, _, cx| {
+        if let Some(family) = &font_to_add {
+            edit(this, false, |libraries| libraries.add_font(id, family));
+        }
+        cx.notify();
+    }))
+    .xsmall()
+    .disabled(already_there);
+    section = section.child(subheading("Fonts", add_font));
+    if brand.fonts.is_empty() {
+        section = section.child(div().pl(px(30.0)).pb_1().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child("Press + to add the selected text's font."));
+    }
+    for family in &brand.fonts {
+        let (apply, remove) = (family.clone(), family.clone());
+        section = section.child(
+            div()
+                .id(ElementId::Name(format!("library-font:{}:{family}", id.0).into()))
+                .h(px(30.0))
+                .mx_1()
+                .pl(px(26.0))
+                .pr_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .rounded(px(6.0))
+                .cursor_pointer()
+                .hover(|style| style.bg(hsla(color::HOVER)))
+                .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                    let layers = this.state.selected.clone();
+                    if event.click_count() == 1 && this.state.set_font(&apply, &layers) > 0 {
+                        cx.notify();
+                    }
+                }))
+                .child(div().flex_1().min_w_0().truncate().text_size(px(size::LARGE_TEXT)).font_family(family.clone()).child(family.clone()))
+                .child(
+                    icon_button(ElementId::Name(format!("library-remove-font:{}:{family}", id.0).into()), IconName::Trash, "Remove from this brand", false, cx.listener(move |this, _, _, cx| {
+                        edit(this, false, |libraries| libraries.remove_font(id, &remove));
+                        cx.notify();
+                    }))
+                    .xsmall(),
+                )
+                .test_support(),
+        );
+    }
+    section
 }
 
 pub fn render(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoElement + use<> {
@@ -330,7 +393,7 @@ pub fn render(workspace: &Workspace, cx: &mut Context<Workspace>) -> impl IntoEl
         .test_support();
     let mut list = div().id("libraries-list").size_full().overflow_y_scroll().pb_2().child(new_brand);
     if workspace.state.libraries.brands.is_empty() {
-        list = list.child(hint("A brand holds colors and text styles every project can use, here and in Omina Motion. Using one links it: change it here and it changes everywhere."));
+        list = list.child(hint("A brand holds colors, text styles and fonts every project can use, here and in Omina Motion. Using one links it: change it here and it changes everywhere."));
     }
     for brand in &workspace.state.libraries.brands {
         list = list.child(brand_section(brand, workspace, cx));

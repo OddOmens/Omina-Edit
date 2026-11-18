@@ -255,13 +255,7 @@ fn text_card(layer: &Layer, text: &canvas_core::document::TextLayer, workspace: 
     let id = layer.id;
     let font = super::options::font_menu("text-font", text.style.font_family.clone(), |this, family| {
         let ids = this.state.selected.clone();
-        for id in ids {
-            this.state.edit_layer(id, "Font", |layer| {
-                if let Content::Text(text) = &mut layer.content {
-                    text.style.font_family = family.clone();
-                }
-            });
-        }
+        this.state.set_font(&family, &ids);
     }, workspace, cx);
     let weight = super::options::weight_menu("text-weight", text.style.font_family.clone(), text.style.weight, |this, weight| {
         let ids = this.state.selected.clone();

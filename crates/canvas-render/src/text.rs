@@ -139,6 +139,9 @@ pub struct TextEngine {
     /// Recently drawn text bitmaps, by what they show.
     cache: HashMap<String, (Bitmap, f32, u64)>,
     frame: u64,
+    /// The weight each (family, asked-for weight) is drawn at, so fonts are only looked through
+    /// once for each.
+    drawn_weights: HashMap<(String, u16), u16>,
 }
 
 impl Default for TextEngine {
@@ -149,7 +152,7 @@ impl Default for TextEngine {
 
 impl TextEngine {
     pub fn new() -> Self {
-        Self { fonts: None, glyphs: SwashCache::new(), cache: HashMap::new(), frame: 0 }
+        Self { fonts: None, glyphs: SwashCache::new(), cache: HashMap::new(), frame: 0, drawn_weights: HashMap::new() }
     }
 
     /// The font system, loading the system's fonts the first time (which takes a moment).
@@ -182,10 +185,40 @@ impl TextEngine {
         weights
     }
 
-    fn attrs(style: &TextStyle) -> Attrs<'_> {
+    /// The weight `family` is drawn at when `wanted` is asked for: `wanted` itself when the family
+    /// has it (or is a variable font, which can make any weight in its range), otherwise the
+    /// family's nearest weight, the heavier one on a tie. Without this, asking for a weight a
+    /// family doesn't come in (bold, in a font made only in regular) would make the layout pass
+    /// the family over and draw the text in the system font instead.
+    pub fn nearest_weight(&mut self, family: &str, wanted: u16) -> u16 {
+        let wanted = wanted.clamp(100, 900);
+        let db = self.fonts().db();
+        let faces: Vec<_> = db.faces().filter(|face| face.families.iter().any(|(name, _)| name == family)).collect();
+        if faces.is_empty() || faces.iter().any(|face| face.weight.0 == wanted) {
+            return wanted;
+        }
+        let variable = faces.iter().any(|face| db.with_face_data(face.id, |data, index| single_face(data, index).is_some_and(|font| has_table(&font, b"fvar"))) == Some(true));
+        if variable {
+            return wanted;
+        }
+        faces.iter().map(|face| face.weight.0).min_by_key(|weight| (weight.abs_diff(wanted), std::cmp::Reverse(*weight))).unwrap_or(wanted)
+    }
+
+    /// `nearest_weight` for a style, remembered.
+    fn drawn_weight(&mut self, style: &TextStyle) -> u16 {
+        let key = (style.font_family.clone(), style.weight);
+        if let Some(weight) = self.drawn_weights.get(&key) {
+            return *weight;
+        }
+        let weight = self.nearest_weight(&style.font_family, style.weight);
+        self.drawn_weights.insert(key, weight);
+        weight
+    }
+
+    fn attrs(style: &TextStyle, weight: u16) -> Attrs<'_> {
         Attrs::new()
             .family(Family::Name(&style.font_family))
-            .weight(Weight(style.weight.clamp(100, 900)))
+            .weight(Weight(weight))
             .style(if style.italic { Style::Italic } else { Style::Normal })
             // Tracking is in thousandths of an em; cosmic-text letter spacing is in ems.
             .letter_spacing(style.tracking / 1000.0)
@@ -196,9 +229,10 @@ impl TextEngine {
         let font_size = style.font_size.clamp(0.5, 5000.0);
         let line_height = font_size * style.line_height.clamp(0.1, 10.0);
         let metrics = Metrics::new(font_size * scale, line_height * scale);
+        let weight = self.drawn_weight(style);
         let fonts = self.fonts.get_or_insert_with(FontSystem::new);
         let mut buffer = Buffer::new(fonts, metrics);
-        let attrs = Self::attrs(style);
+        let attrs = Self::attrs(style, weight);
         let align = match style.align {
             TextAlign::Left => cosmic_text::Align::Left,
             TextAlign::Center => cosmic_text::Align::Center,
@@ -457,6 +491,31 @@ mod tests {
 
     fn layer(text: &str) -> TextLayer {
         TextLayer { text: text.into(), style: TextStyle { font_size: 40.0, ..TextStyle::default() }, placement: Placement::default(), box_width: None, measured: Vec2::ZERO }
+    }
+
+    #[test]
+    fn a_weight_the_font_lacks_draws_its_nearest_weight_not_another_font() {
+        let mut engine = TextEngine::new();
+        // Any installed family made only in regular that has Latin letters; none, nothing to check.
+        let families = engine.families();
+        let single = families.into_iter().find(|family| {
+            engine.weights(family) == [400] && {
+                let style = TextStyle { font_family: family.clone(), ..TextStyle::default() };
+                let (buffer, _) = engine.layout("Tide", &style, None, 1.0);
+                let ids: Vec<_> = buffer.layout_runs().flat_map(|run| run.glyphs.iter().map(|glyph| glyph.font_id).collect::<Vec<_>>()).collect();
+                !ids.is_empty() && ids.iter().all(|id| engine.fonts().db().face(*id).is_some_and(|face| face.families.iter().any(|(name, _)| name == family)))
+            }
+        });
+        let Some(family) = single else { return };
+        assert_eq!(engine.nearest_weight(&family, 700), 400);
+        let style = TextStyle { font_family: family.clone(), weight: 700, ..TextStyle::default() };
+        let (buffer, _) = engine.layout("Tide", &style, None, 1.0);
+        for run in buffer.layout_runs() {
+            for glyph in run.glyphs {
+                let face = engine.fonts().db().face(glyph.font_id).expect("the glyph's face");
+                assert!(face.families.iter().any(|(name, _)| *name == family), "drawn in {} instead of {family}", face.post_script_name);
+            }
+        }
     }
 
     #[test]
