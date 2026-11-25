@@ -272,6 +272,10 @@ fn draw(workspace: &mut Workspace, frame: Frame, window: &mut Window, cx: &mut C
     if same_view && workspace.ui.viewer.drawn.is_some_and(|drawn| drawn.revision == revision) && workspace.ui.viewer.image.is_some() {
         return;
     }
+    // Text layers' boxes follow their text. They are measured before drawing because the
+    // renderer only paints a text layer inside its measured box: measured afterwards, a change
+    // to a wider font or a bigger size would stay cut off at the old size.
+    measure_text_layers(workspace);
     let doc = workspace.state.doc().clone();
     // Layers being dragged keep their picture from before the drag, moved, so a drag stays
     // smooth however slow a layer's effects are; the frame after it ends draws them afresh.
@@ -321,8 +325,6 @@ fn draw(workspace: &mut Workspace, frame: Frame, window: &mut Window, cx: &mut C
         cx.drop_image(previous, Some(window));
     }
     workspace.ui.viewer.drawn = Some(Drawn { document, frame, transparency, revision });
-    // Text layers' boxes follow their measured text.
-    measure_text_layers(workspace);
 }
 
 /// Keeps text layers' measured sizes current, without making undo steps of it.
@@ -1148,4 +1150,44 @@ fn typing_overlay(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> Opt
     let at = caret.map_or_else(|| corners[0], |(top, _)| top);
     let hidden = div().absolute().left(px(at.x)).top(px(at.y)).size(px(1.0)).overflow_hidden().opacity(0.0).child(div().w(px(400.0)).child(field));
     Some(div().absolute().size_full().children(marks).child(hidden).into_any_element())
+}
+
+#[cfg(test)]
+mod tests {
+    use canvas_core::document::{Content, Layer, TextLayer, TextStyle};
+    use gpui_kit::TestAppContext;
+
+    use crate::ui_tests::{open, render};
+
+    /// Making text bigger draws all of it at once: the canvas doesn't keep it cut off at the
+    /// size it was before.
+    #[gpui_kit::test]
+    fn text_made_bigger_is_drawn_whole(cx: &mut TestAppContext) {
+        let (workspace, visual) = open(cx);
+        let id = visual.update(|_, cx| {
+            workspace.update(cx, |ws, _| {
+                let id = ws.state.project.new_id();
+                let text = TextLayer { text: "TIDE KEEP".into(), style: TextStyle { font_size: 40.0, ..TextStyle::default() }, placement: Default::default(), box_width: None, measured: Default::default() };
+                ws.state.doc_mut().layers.push(Layer::new(id, "Text", Content::Text(text)));
+                id
+            })
+        });
+        render(visual);
+        visual.update(|_, cx| {
+            workspace.update(cx, |ws, _| {
+                ws.state.edit_layer(id, "Size", |layer| {
+                    if let Content::Text(text) = &mut layer.content {
+                        text.style.font_size = 160.0;
+                    }
+                });
+            })
+        });
+        render(visual);
+        let drawn = visual.update(|_, cx| workspace.read(cx).ui.viewer.pixels.clone()).expect("the canvas was drawn");
+        // Drawing it all again from scratch gives the same picture.
+        visual.update(|_, cx| workspace.update(cx, |ws, _| ws.ui.viewer.drawn = None));
+        render(visual);
+        let redrawn = visual.update(|_, cx| workspace.read(cx).ui.viewer.pixels.clone()).expect("the canvas was drawn");
+        assert!(drawn.data() == redrawn.data(), "the bigger text was cut off at its old size");
+    }
 }

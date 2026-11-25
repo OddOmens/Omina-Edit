@@ -327,6 +327,91 @@ fn picking_a_weight_from_the_menu_sets_the_texts_weight(cx: &mut TestAppContext)
     assert_eq!(weight_of(visual), other);
 }
 
+/// Choosing a font that doesn't come in the text's weight moves the text to the nearest weight
+/// the font has, so the Weight menu never shows a weight the font can't draw.
+#[gpui_kit::test]
+fn a_new_font_without_the_texts_weight_takes_its_nearest_weight(cx: &mut TestAppContext) {
+    use canvas_core::document::{Content, Layer, TextLayer, TextStyle};
+    let (workspace, visual) = open(cx);
+    crate::app_settings::update(|settings| settings.onboarded = true);
+    launch(&workspace, visual);
+    press_keys(visual, "escape");
+    // Any installed family made only in regular; with none, there is nothing to check.
+    let regular_only = visual.update(|_, cx| workspace.update(cx, |ws, _| {
+        let families = ws.state.renderer.text.families();
+        families.into_iter().find(|family| ws.state.renderer.text.weights(family) == [400])
+    }));
+    let Some(regular_only) = regular_only else { return };
+    let id = visual.update(|_, cx| {
+        workspace.update(cx, |ws, cx| {
+            let id = ws.state.project.new_id();
+            let style = TextStyle { font_family: "Helvetica".into(), weight: 700, ..TextStyle::default() };
+            let text = TextLayer { text: "Tide".into(), style, placement: Default::default(), box_width: None, measured: Default::default() };
+            ws.state.doc_mut().layers.push(Layer::new(id, "Text", Content::Text(text)));
+            ws.state.selected = vec![id];
+            cx.notify();
+            id
+        })
+    });
+    render(visual);
+    visual.update(|window, cx| window.click("text-font", cx));
+    render(visual);
+    visual.update(|window, cx| window.click(format!("font-{regular_only}"), cx));
+    render(visual);
+    let style = visual.update(|_, cx| match &workspace.read(cx).state.doc().layer(id).expect("the text layer").content {
+        Content::Text(text) => text.style.clone(),
+        _ => unreachable!("the layer holds text"),
+    });
+    assert_eq!((style.font_family.as_str(), style.weight), (regular_only.as_str(), 400));
+}
+
+/// Text has a Stroke card like a shape's: its color, width and options reach the text, and
+/// its fill can be switched off for outlined words.
+#[gpui_kit::test]
+fn text_takes_a_stroke_and_can_drop_its_fill(cx: &mut TestAppContext) {
+    use crate::panels::color_picker::{self, Target};
+    use crate::panels::fields::FieldTarget;
+    use canvas_core::document::{Content, Layer, TextLayer, TextStyle};
+    use canvas_core::vector::{Paint, StrokeAlign};
+    let (workspace, visual) = open(cx);
+    crate::app_settings::update(|settings| settings.onboarded = true);
+    launch(&workspace, visual);
+    press_keys(visual, "escape");
+    let id = visual.update(|_, cx| {
+        workspace.update(cx, |ws, cx| {
+            let id = ws.state.project.new_id();
+            let text = TextLayer { text: "Tide".into(), style: TextStyle::default(), placement: Default::default(), box_width: None, measured: Default::default() };
+            ws.state.doc_mut().layers.push(Layer::new(id, "Text", Content::Text(text)));
+            ws.state.selected = vec![id];
+            cx.notify();
+            id
+        })
+    });
+    render(visual);
+    let red = canvas_core::Rgba::from_u32(0xff0000);
+    visual.update(|_, cx| {
+        workspace.update(cx, |ws, cx| {
+            color_picker::write(ws, Target::LayerStroke(id), 0, red);
+            FieldTarget::StrokeWidth(id).write(&mut ws.state, 5.0);
+            cx.notify();
+        })
+    });
+    render(visual);
+    visual.update(|window, cx| window.click(format!("stroke-dash-{}", id.0), cx));
+    render(visual);
+    visual.update(|window, cx| window.click(format!("text-filled-{}", id.0), cx));
+    render(visual);
+    let style = visual.update(|_, cx| match &workspace.read(cx).state.doc().layer(id).expect("the text layer").content {
+        Content::Text(text) => text.style.clone(),
+        _ => unreachable!("the layer holds text"),
+    });
+    assert_eq!(style.stroke.paint, Paint::Solid(red));
+    assert_eq!(style.stroke.width, 5.0);
+    assert_eq!(style.stroke.align, StrokeAlign::Outside, "a text stroke starts outside the letters");
+    assert_eq!(style.stroke.dash, vec![15.0, 10.0], "dashes start in proportion to the width");
+    assert!(!style.filled, "the fill was switched off");
+}
+
 /// Renames the open document: an unsaved change that a saved file brings back.
 fn make_an_edit(workspace: &Entity<Workspace>, visual: &mut VisualTestContext, name: &str) {
     visual.update(|_, cx| {
@@ -402,7 +487,7 @@ fn unsaved_work_is_recovered_after_canvas_closes_without_saving(cx: &mut TestApp
     let chosen = folder.join("Poster");
     visual.simulate_new_path_selection(move |_| Some(chosen));
     visual.run_until_parked();
-    assert!(folder.join("Poster.canvas").exists());
+    assert!(folder.join("Poster.omie").exists(), "a new project is saved as .omie");
     assert!(!unsaved(&workspace, visual));
     assert!(!copy_path().exists(), "nothing is left to recover once it is saved");
     std::fs::remove_dir_all(&folder).ok();
@@ -461,7 +546,7 @@ fn a_copy_still_being_written_when_the_project_is_saved_never_comes_back(cx: &mu
     use crate::recovery::copy_path;
     let (workspace, visual) = open(cx);
     let folder = scratch_folder("saved-while-copying");
-    let file = folder.join("Flyer.canvas");
+    let file = folder.join("Flyer.omie");
     make_an_edit(&workspace, visual, "Flyer");
     // The timer starts a copy in the background, and the project is saved before it is done.
     visual.update(|window, cx| {

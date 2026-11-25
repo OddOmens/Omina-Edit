@@ -629,7 +629,7 @@ fn sizes_page(cx: &mut Context<Workspace>) -> impl IntoElement {
         .children(groups)
 }
 
-/// A project's name: its file name without `.canvas`.
+/// A project's name: its file name without its extension.
 fn display_name(path: &Path) -> String {
     path.file_stem().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
 }

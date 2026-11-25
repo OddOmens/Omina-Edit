@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use canvas_core::document::{BlendMode, Content, Document, Layer, LayerStyles, Shadow, StrokePosition, TextAlign, TextLayer};
 use canvas_core::geom::{Rect, Vec2};
 use canvas_core::image_io::{ExportFormat, encode, write_atomically};
-use canvas_core::vector::{Gradient, GradientKind, LineCap, LineJoin, Paint, PathData, VectorShape};
+use canvas_core::vector::{Gradient, GradientKind, LineCap, LineJoin, Paint, PathData, StrokeAlign, VectorShape};
 use canvas_core::Rgba;
 use canvas_render::Renderer;
 use serde_json::{Value, json};
@@ -433,11 +433,18 @@ impl Sender<'_> {
             },
             "ls": 0,
         });
-        // A fill switched fully off leaves outlined words.
-        if layer.fill_opacity >= 0.999 {
+        // A fill switched off (on the text, or the layer's fill opacity fully down) leaves
+        // outlined words.
+        if style.filled && layer.fill_opacity >= 0.999 {
             document["fc"] = json!([style.color.r, style.color.g, style.color.b]);
         }
-        if let Some(outline) = layer.styles.stroke.filter(|stroke| stroke.enabled && stroke.size > 0.0) {
+        if let Some(color) = style.stroke.visible().then(|| style.stroke.paint.main_color()).flatten() {
+            // The text's own stroke, as for a layer style stroke below.
+            let width = if style.stroke.align == StrokeAlign::Outside { style.stroke.width } else { style.stroke.width * 0.5 };
+            document["sc"] = json!([color.r, color.g, color.b]);
+            document["sw"] = json!(width);
+            document["of"] = json!(!style.stroke_behind && style.stroke.align != StrokeAlign::Outside);
+        } else if let Some(outline) = layer.styles.stroke.filter(|stroke| stroke.enabled && stroke.size > 0.0) {
             // Studio's text outline grows out from the letters, as Canvas's outside one does;
             // a centred or inside one shows half as wide outside them.
             let width = if outline.position == StrokePosition::Outside { outline.size } else { outline.size * 0.5 };

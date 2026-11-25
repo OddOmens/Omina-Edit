@@ -888,6 +888,7 @@ impl Workspace {
         // The start screen shows first, unless Settings asks to reopen the last project.
         #[cfg(not(test))]
         cx.defer_in(window, crate::project_files::on_launch);
+        crate::opened_files::watch(window, cx, crate::project_files::open_handed_over);
         // A crash last time is mentioned once, with its report, and the daily update check
         // runs quietly. (Not in headless tests.)
         #[cfg(not(test))]

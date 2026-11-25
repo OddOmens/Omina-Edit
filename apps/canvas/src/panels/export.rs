@@ -234,6 +234,10 @@ fn vector_items(workspace: &mut Workspace, doc: &Document, layer: &Layer, scale:
             items.push(Item::Path { path: shape.document_path(), fill: fill.map(|color| (color, shape.fill_rule)), line, opacity: opacity * alpha });
         }
         Content::Text(text) => {
+            // PDF text here is filled glyphs only; stroked or unfilled text goes in as a picture.
+            if text.style.stroke.visible() || !text.style.filled {
+                return None;
+            }
             let glyphs = workspace.state.renderer.text.glyphs(text)?;
             // Fonts already on the page are written once.
             let mut fonts: Vec<usize> = Vec::new();

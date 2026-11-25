@@ -10,6 +10,7 @@ mod features;
 mod keymap;
 mod library_store;
 mod motion;
+mod opened_files;
 mod panels;
 mod project_files;
 mod project_thumbnails;
@@ -31,7 +32,10 @@ fn main() {
     if let Err(error) = rayon::ThreadPoolBuilder::new().stack_size(16 << 20).build_global() {
         eprintln!("could not set up the worker threads: {error}");
     }
-    gpui_kit::application().with_assets(assets::CanvasAssets).run(|cx: &mut App| {
+    let app = gpui_kit::application().with_assets(assets::CanvasAssets);
+    // Projects double-clicked in Finder, at launch or later.
+    opened_files::listen(&app);
+    app.run(|cx: &mut App| {
         // Must run before any component is used.
         gpui_kit::init(cx);
         let settings = app_settings::load();

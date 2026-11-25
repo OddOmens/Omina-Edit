@@ -6,8 +6,10 @@ use std::collections::HashMap;
 
 use canvas_core::bitmap::{Bitmap, mul_div_255};
 use canvas_core::document::{TextAlign, TextLayer, TextStyle};
-use canvas_core::geom::Vec2;
-use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Style, SwashCache, SwashContent, Weight};
+use canvas_core::vector::StrokeAlign;
+use canvas_core::geom::{Affine, Rect, Vec2};
+use cosmic_text::{Attrs, Buffer, Command, Family, FontSystem, Metrics, Shaping, Style, SwashCache, SwashContent, Weight};
+use tiny_skia::{FillRule, PathBuilder, Pixmap, PixmapPaint, Transform};
 
 /// The largest side a text bitmap may have; bigger text is drawn smaller and scaled up.
 const MAX_TEXT_SIDE: f32 = 8192.0;
@@ -133,6 +135,47 @@ fn has_table(font: &[u8], tag: &[u8; 4]) -> bool {
     (0..tables).any(|table| font.get(12 + table * 16..16 + table * 16) == Some(tag.as_slice()))
 }
 
+/// Whether the font at `index` in `data` is a variable font whose weight axis reaches `weight`,
+/// judged as cosmic-text judges it when choosing a face.
+fn weight_axis_covers(data: &[u8], index: u32, weight: u16) -> bool {
+    use cosmic_text::skrifa::{MetadataProvider, Tag};
+    let Ok(font) = cosmic_text::skrifa::FontRef::from_index(data, index) else { return false };
+    font.axes().get_by_tag(Tag::new(b"wght")).is_some_and(|axis| (axis.min_value()..=axis.max_value()).contains(&f32::from(weight)))
+}
+
+/// How many characters the font at `index` in `data` has shapes for.
+fn characters_covered(data: &[u8], index: u32) -> usize {
+    use cosmic_text::skrifa::MetadataProvider;
+    cosmic_text::skrifa::FontRef::from_index(data, index).map_or(0, |font| font.charmap().mappings().count())
+}
+
+/// Loads the installed fonts, leaving out faces that would hide a family's real face. Some
+/// families install an ornament face under the same name, weight and style as their regular
+/// face (Hoefler Text Ornaments, for one). A layout can only ever pick one face for a given
+/// family, weight and style, and if it picks the ornaments, ordinary text comes out as
+/// ornaments and the system font. So of faces that are asked for the same way, only the one
+/// covering the most characters is kept. (Omina Motion loads its fonts the same way.)
+fn load_fonts() -> FontSystem {
+    let mut fonts = FontSystem::new();
+    let db = fonts.db_mut();
+    // Faces grouped by how a layout asks for them: family, weight, style and width.
+    let mut alike: HashMap<(String, u16, String, u16), Vec<cosmic_text::fontdb::ID>> = HashMap::new();
+    for face in db.faces() {
+        let Some((family, _)) = face.families.first() else { continue };
+        alike.entry((family.clone(), face.weight.0, format!("{:?}", face.style), face.stretch.to_number())).or_default().push(face.id);
+    }
+    for ids in alike.into_values().filter(|ids| ids.len() > 1) {
+        let coverage: Vec<usize> = ids.iter().map(|id| db.with_face_data(*id, characters_covered).unwrap_or(0)).collect();
+        let fullest = (0..ids.len()).max_by_key(|at| coverage[*at]).unwrap_or(0);
+        for (at, id) in ids.iter().enumerate() {
+            if at != fullest {
+                db.remove_face(*id);
+            }
+        }
+    }
+    fonts
+}
+
 pub struct TextEngine {
     fonts: Option<FontSystem>,
     glyphs: SwashCache,
@@ -157,7 +200,7 @@ impl TextEngine {
 
     /// The font system, loading the system's fonts the first time (which takes a moment).
     fn fonts(&mut self) -> &mut FontSystem {
-        self.fonts.get_or_insert_with(FontSystem::new)
+        self.fonts.get_or_insert_with(load_fonts)
     }
 
     /// The installed font families, sorted, for the font menu.
@@ -186,7 +229,7 @@ impl TextEngine {
     }
 
     /// The weight `family` is drawn at when `wanted` is asked for: `wanted` itself when the family
-    /// has it (or is a variable font, which can make any weight in its range), otherwise the
+    /// has it (or is a variable font whose weight axis reaches it), otherwise the
     /// family's nearest weight, the heavier one on a tie. Without this, asking for a weight a
     /// family doesn't come in (bold, in a font made only in regular) would make the layout pass
     /// the family over and draw the text in the system font instead.
@@ -197,7 +240,10 @@ impl TextEngine {
         if faces.is_empty() || faces.iter().any(|face| face.weight.0 == wanted) {
             return wanted;
         }
-        let variable = faces.iter().any(|face| db.with_face_data(face.id, |data, index| single_face(data, index).is_some_and(|font| has_table(&font, b"fvar"))) == Some(true));
+        // A variable font can make the weight only when it lies on the font's weight axis. (Some
+        // older Apple fonts measure that axis on a scale of their own, so their range rarely
+        // covers 100 to 900.)
+        let variable = faces.iter().any(|face| db.with_face_data(face.id, |data, index| weight_axis_covers(data, index, wanted)) == Some(true));
         if variable {
             return wanted;
         }
@@ -230,7 +276,7 @@ impl TextEngine {
         let line_height = font_size * style.line_height.clamp(0.1, 10.0);
         let metrics = Metrics::new(font_size * scale, line_height * scale);
         let weight = self.drawn_weight(style);
-        let fonts = self.fonts.get_or_insert_with(FontSystem::new);
+        let fonts = self.fonts.get_or_insert_with(load_fonts);
         let mut buffer = Buffer::new(fonts, metrics);
         let attrs = Self::attrs(style, weight);
         let align = match style.align {
@@ -266,7 +312,7 @@ impl TextEngine {
     /// weight a plain embedded font can't carry), or a font file too large or unreadable.
     pub fn glyphs(&mut self, layer: &TextLayer) -> Option<TextGlyphs> {
         let (buffer, _) = self.layout(&layer.text, &layer.style, layer.box_width, 1.0);
-        let fonts = self.fonts.get_or_insert_with(FontSystem::new);
+        let fonts = self.fonts.get_or_insert_with(load_fonts);
         let mut out = TextGlyphs::default();
         let mut font_ids: Vec<cosmic_text::fontdb::ID> = Vec::new();
         for run in buffer.layout_runs() {
@@ -382,10 +428,17 @@ impl TextEngine {
         }
         let mut coverage = vec![0u8; width * height];
         let mut colored: Vec<[u8; 4]> = Vec::new();
-        let fonts = self.fonts.get_or_insert_with(FontSystem::new);
+        // The letters' outlines, gathered only when there is a stroke to draw along them.
+        let stroked = layer.style.stroke.visible();
+        let mut outline = PathBuilder::new();
+        let fonts = self.fonts.get_or_insert_with(load_fonts);
         for run in buffer.layout_runs() {
             for glyph in run.glyphs {
                 let physical = glyph.physical((pad as f32, pad as f32 + run.line_y), 1.0);
+                if stroked && let Some(commands) = self.glyphs.get_outline_commands(fonts, physical.cache_key) {
+                    let origin = Vec2::new(pad as f32 + glyph.x + glyph.font_size * glyph.x_offset, pad as f32 + run.line_y + glyph.y - glyph.font_size * glyph.y_offset);
+                    add_glyph_outline(&mut outline, commands, origin);
+                }
                 let Some(image) = self.glyphs.get_image(fonts, physical.cache_key).as_ref() else { continue };
                 let (left, top) = (physical.x + image.placement.left, physical.y - image.placement.top);
                 let (glyph_w, glyph_h) = (image.placement.width as i32, image.placement.height as i32);
@@ -425,17 +478,28 @@ impl TextEngine {
                         }
                     }
                 }
-            }
-        }
-        let color = layer.style.color.to_premultiplied();
-        let mut bitmap = Bitmap::new(width as u32, height as u32);
-        for (index, pixel) in bitmap.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let cover = u32::from(coverage[index]);
-            if cover > 0 {
-                for channel in 0..4 {
-                    pixel[channel] = mul_div_255(u32::from(color[channel]), cover) as u8;
+                // The underline is stroked with the letters.
+                if let Some(bar) = tiny_skia::Rect::from_xywh(x0.floor(), y.floor(), (x1.ceil() - x0.floor()).max(1.0), (y + thickness).ceil() - y.floor()) {
+                    outline.push_rect(bar);
                 }
             }
+        }
+        let mut bitmap = Bitmap::new(width as u32, height as u32);
+        if layer.style.filled {
+            let color = layer.style.color.to_premultiplied();
+            for (pixel, &cover) in bitmap.data.as_chunks_mut::<4>().0.iter_mut().zip(&coverage) {
+                if cover > 0 {
+                    for channel in 0..4 {
+                        pixel[channel] = mul_div_255(u32::from(color[channel]), u32::from(cover)) as u8;
+                    }
+                }
+            }
+        }
+        if stroked && let Some(path) = outline.finish() {
+            let text_box = Rect::new(pad as f32, pad as f32, box_size.x * scale, box_size.y * scale);
+            bitmap = with_stroke(bitmap, &path, &layer.style, text_box, scale);
+        }
+        for (index, pixel) in bitmap.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             if let Some(emoji) = colored.get(index).filter(|emoji| emoji[3] > 0) {
                 // Emoji keep their own colors, drawn over the rest.
                 let mut premultiplied = *emoji;
@@ -451,10 +515,61 @@ impl TextEngine {
     }
 
     /// Space left around the text box in a text bitmap at `scale`, for letters that reach past
-    /// it (italics, accents, descenders).
+    /// it (italics, accents, descenders) and for the stroke around them.
     pub fn pad(style: &TextStyle, scale: f32) -> usize {
-        (style.font_size * scale * 0.3).ceil() as usize + 2
+        ((style.font_size * 0.3 + style.stroke.reach()) * scale).ceil() as usize + 2
     }
+}
+
+/// Adds one glyph's outline to `path`, with the glyph's origin (on its baseline) at `origin`.
+/// Font outlines point up; the bitmap's rows go down, so the outline is flipped.
+fn add_glyph_outline(path: &mut PathBuilder, commands: &[Command], origin: Vec2) {
+    let at = |x: f32, y: f32| (origin.x + x, origin.y - y);
+    for command in commands {
+        match *command {
+            Command::MoveTo(to) => {
+                let (x, y) = at(to.x, to.y);
+                path.move_to(x, y);
+            }
+            Command::LineTo(to) => {
+                let (x, y) = at(to.x, to.y);
+                path.line_to(x, y);
+            }
+            Command::QuadTo(control, to) => {
+                let ((cx, cy), (x, y)) = (at(control.x, control.y), at(to.x, to.y));
+                path.quad_to(cx, cy, x, y);
+            }
+            Command::CurveTo(first, second, to) => {
+                let ((ax, ay), (bx, by), (x, y)) = (at(first.x, first.y), at(second.x, second.y), at(to.x, to.y));
+                path.cubic_to(ax, ay, bx, by, x, y);
+            }
+            Command::Close => path.close(),
+        }
+    }
+}
+
+/// The filled letters in `fill` with `style`'s stroke drawn along `outline`, under or over
+/// them. `text_box` is where the text box sits in the bitmap, which a gradient stroke spans.
+fn with_stroke(fill: Bitmap, outline: &tiny_skia::Path, style: &TextStyle, text_box: Rect, scale: f32) -> Bitmap {
+    let (width, height) = (fill.width, fill.height);
+    let (Some(mut stroke), Some(mut out)) = (Pixmap::new(width, height), Pixmap::new(width, height)) else { return fill };
+    let Some(paint) = crate::skia_paint(&style.stroke.paint, text_box, Affine::IDENTITY) else { return fill };
+    // An outside stroke around opaque letters is drawn centered at twice the width, under them:
+    // it looks the same, without a seam where the soft edges of letter and stroke meet.
+    let under_opaque_letters = style.stroke.align == StrokeAlign::Outside && style.filled && style.color.a >= 0.999;
+    if under_opaque_letters {
+        let doubled = canvas_core::vector::Stroke { width: style.stroke.width * 2.0, ..style.stroke.clone() };
+        crate::stroke_outline(&mut stroke, outline, FillRule::Winding, &doubled, StrokeAlign::Center, &paint, scale, Transform::identity());
+    } else {
+        crate::stroke_outline(&mut stroke, outline, FillRule::Winding, &style.stroke, style.stroke.align, &paint, scale, Transform::identity());
+    }
+    let Some(letters) = tiny_skia::PixmapRef::from_bytes(&fill.data, width, height) else { return fill };
+    let stroke_under = style.stroke_behind || under_opaque_letters;
+    let (under, over) = if stroke_under { (stroke.as_ref(), letters) } else { (letters, stroke.as_ref()) };
+    for layer in [under, over] {
+        out.draw_pixmap(0, 0, layer, &PixmapPaint::default(), Transform::identity(), None);
+    }
+    Bitmap { width, height, data: out.take() }
 }
 
 #[cfg(test)]
@@ -519,6 +634,36 @@ mod tests {
     }
 
     #[test]
+    fn every_installed_font_with_the_letters_draws_them_itself() {
+        // Fonts with quirks this covers, where installed: Skia, an old Apple variable font with
+        // a weight scale of its own, and Hoefler Text, whose ornament face shares its name.
+        let mut engine = TextEngine::new();
+        let mut wrong = Vec::new();
+        for family in engine.families() {
+            let ids: Vec<_> = engine.fonts().db().faces().filter(|face| face.families.iter().any(|(name, _)| *name == family)).map(|face| face.id).collect();
+            let has_letters = ids.iter().any(|id| {
+                engine.fonts().db().with_face_data(*id, |data, index| {
+                    use cosmic_text::skrifa::MetadataProvider;
+                    cosmic_text::skrifa::FontRef::from_index(data, index).is_ok_and(|font| "Tide".chars().all(|letter| font.charmap().map(letter).is_some()))
+                }) == Some(true)
+            });
+            if !has_letters {
+                continue;
+            }
+            for weight in [400, 700] {
+                let style = TextStyle { font_family: family.clone(), weight, ..TextStyle::default() };
+                let (buffer, _) = engine.layout("Tide", &style, None, 1.0);
+                let font_ids: Vec<_> = buffer.layout_runs().flat_map(|run| run.glyphs.iter().map(|glyph| glyph.font_id).collect::<Vec<_>>()).collect();
+                let db = engine.fonts().db();
+                if let Some(other) = font_ids.iter().filter_map(|id| db.face(*id)).find(|face| !face.families.iter().any(|(name, _)| *name == family)) {
+                    wrong.push(format!("{family} at {weight}: drawn in {}", other.post_script_name));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    #[test]
     fn glyphs_come_with_their_fonts_and_text() {
         let mut engine = TextEngine::new();
         let text = layer("Hi there");
@@ -550,6 +695,92 @@ mod tests {
         assert_eq!(u32::from_be_bytes(face[20..24].try_into().unwrap()), 28, "the table moved after the new directory");
         assert_eq!(&face[28..32], b"wxyz");
         assert!(single_face(&ttc, 3).is_none());
+    }
+
+    /// A layer showing a heavy "O" in black, with `change` applied to its style.
+    fn letter_o(change: impl FnOnce(&mut TextStyle)) -> TextLayer {
+        let mut layer = layer("O");
+        layer.style.font_size = 120.0;
+        layer.style.weight = 700;
+        change(&mut layer.style);
+        layer
+    }
+
+    /// The pixel at (x, y), counted from the text box's top-left corner.
+    fn pixel_at(bitmap: &Bitmap, style: &TextStyle, x: usize, y: usize) -> [u8; 4] {
+        let pad = TextEngine::pad(style, 1.0);
+        let at = ((y + pad) * bitmap.width as usize + x + pad) * 4;
+        bitmap.data[at..at + 4].try_into().unwrap()
+    }
+
+    /// Counts pixels mostly of one color: (red-ish, black-ish).
+    fn red_and_black(bitmap: &Bitmap) -> (usize, usize) {
+        let pixels = bitmap.data.as_chunks::<4>().0;
+        let red = pixels.iter().filter(|pixel| pixel[3] > 200 && pixel[0] > 200 && pixel[1] < 60).count();
+        let black = pixels.iter().filter(|pixel| pixel[3] > 200 && pixel[0] < 40).count();
+        (red, black)
+    }
+
+    fn red_stroke(width: f32, align: canvas_core::vector::StrokeAlign) -> canvas_core::vector::Stroke {
+        canvas_core::vector::Stroke { paint: canvas_core::vector::Paint::Solid(canvas_core::color::Rgba::from_u32(0xff0000)), width, align, ..TextStyle::default_stroke() }
+    }
+
+    #[test]
+    fn a_stroke_outlines_the_letters_and_grows_their_bitmap() {
+        let mut engine = TextEngine::new();
+        let plain = letter_o(|_| {});
+        let outlined = letter_o(|style| style.stroke = red_stroke(6.0, canvas_core::vector::StrokeAlign::Outside));
+        let (plain_bitmap, _) = engine.rasterize(&plain, 1.0).unwrap();
+        let (outlined_bitmap, _) = engine.rasterize(&outlined, 1.0).unwrap();
+        assert!(outlined_bitmap.width >= plain_bitmap.width + 12, "room is left for the stroke");
+        let (red, black) = red_and_black(&outlined_bitmap);
+        let (_, plain_black) = red_and_black(&plain_bitmap);
+        assert!(red > 300, "the stroke is drawn ({red} red pixels)");
+        // An outside stroke leaves the letter's own fill alone, apart from its soft edge.
+        assert!(black * 100 >= plain_black * 95, "the fill keeps its size: {black} vs {plain_black}");
+    }
+
+    #[test]
+    fn text_without_a_fill_is_hollow() {
+        let mut engine = TextEngine::new();
+        let hollow = letter_o(|style| {
+            style.filled = false;
+            style.stroke = red_stroke(3.0, canvas_core::vector::StrokeAlign::Center);
+        });
+        let (bitmap, _) = engine.rasterize(&hollow, 1.0).unwrap();
+        let (red, black) = red_and_black(&bitmap);
+        assert!(red > 200 && black == 0, "only the outline is drawn: {red} red, {black} black");
+        // The middle of the "O" stays clear.
+        let size = engine.measure(&hollow);
+        let middle = pixel_at(&bitmap, &hollow.style, (size.x * 0.5) as usize, (size.y * 0.55) as usize);
+        assert_eq!(middle[3], 0, "the counter of the O is empty");
+    }
+
+    #[test]
+    fn a_stroke_behind_the_fill_only_shows_outside_it() {
+        let mut engine = TextEngine::new();
+        let over = letter_o(|style| style.stroke = red_stroke(8.0, canvas_core::vector::StrokeAlign::Center));
+        let behind = letter_o(|style| {
+            style.stroke = red_stroke(8.0, canvas_core::vector::StrokeAlign::Center);
+            style.stroke_behind = true;
+        });
+        let (over_red, over_black) = red_and_black(&engine.rasterize(&over, 1.0).unwrap().0);
+        let (behind_red, behind_black) = red_and_black(&engine.rasterize(&behind, 1.0).unwrap().0);
+        assert!(behind_black > over_black + 100, "the fill covers the stroke's inner half: {behind_black} vs {over_black}");
+        assert!(behind_red + 100 < over_red, "less of the stroke shows: {behind_red} vs {over_red}");
+    }
+
+    #[test]
+    fn dashes_and_corners_change_the_stroke() {
+        let mut engine = TextEngine::new();
+        let solid = letter_o(|style| style.stroke = red_stroke(4.0, canvas_core::vector::StrokeAlign::Center));
+        let dashed = letter_o(|style| {
+            style.stroke = red_stroke(4.0, canvas_core::vector::StrokeAlign::Center);
+            style.stroke.dash = vec![6.0, 6.0];
+        });
+        let (solid_red, _) = red_and_black(&engine.rasterize(&solid, 1.0).unwrap().0);
+        let (dashed_red, _) = red_and_black(&engine.rasterize(&dashed, 1.0).unwrap().0);
+        assert!(dashed_red * 10 < solid_red * 7, "gaps leave out part of the line: {dashed_red} vs {solid_red}");
     }
 
     #[test]

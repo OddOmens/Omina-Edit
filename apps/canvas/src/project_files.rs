@@ -12,6 +12,7 @@ use gpui_kit::{ClipboardEntry, ClipboardItem, Context, PromptButton, PromptLevel
 
 use crate::app_settings;
 use crate::workspace::Workspace;
+use gpui_kit::component::WindowExt as _;
 
 /// Something to do once a save (or the decision not to) is done.
 pub type Then = Box<dyn FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)>;
@@ -25,6 +26,14 @@ fn starting_folder(workspace: &Workspace) -> PathBuf {
         .and_then(|file| file.parent().map(Path::to_path_buf))
         .or_else(|| workspace.ui.settings.last_folder.clone())
         .unwrap_or_else(|| std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Pictures"))
+}
+
+/// Opens the files the system hands over once Edit is running. Edit shows one project at a
+/// time, so of several, the first is opened (after offering to save unsaved changes).
+pub fn open_handed_over(workspace: &mut Workspace, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Workspace>) {
+    if let Some(path) = paths.into_iter().next() {
+        workspace.open_path(path, window, cx);
+    }
 }
 
 /// What happens when Canvas starts: unsaved work offered back if Canvas closed without saving
@@ -48,11 +57,11 @@ pub fn continue_launch(workspace: &mut Workspace, window: &mut Window, cx: &mut 
     }
 }
 
-/// Opens what launching should open: a file named on the command line, the last project if
-/// Settings asks for it, or else the start screen.
+/// Opens what launching should open: a file the system handed over (double-clicked, or named
+/// on the command line as in `canvas photo.jpg`), the last project if Settings asks for it, or
+/// else the start screen.
 fn open_on_launch(settings: &app_settings::AppSettings, workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
-    // A file named on the command line (`canvas photo.jpg`) opens straight away.
-    if let Some(path) = std::env::args_os().nth(1).map(PathBuf::from).filter(|path| path.exists()) {
+    if let Some(path) = crate::opened_files::take_at_launch().into_iter().next() {
         workspace.open_path(path, window, cx);
         return;
     }
@@ -130,6 +139,9 @@ impl Workspace {
                     let folder = folder.to_path_buf();
                     app_settings::update(|settings| settings.last_folder = Some(folder));
                 }
+                // A brief notice, so a save (⌘S especially) is seen to have worked.
+                let name = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+                window.push_notification(format!("Saved “{name}”").as_str(), cx);
                 crate::workspace::refresh_menus(cx);
                 cx.notify();
                 true
@@ -306,7 +318,7 @@ impl Workspace {
                 std::fs::read_to_string(&path).map_err(|error| error.to_string()).and_then(|text| canvas_core::svg::import(&text, Some(&path))).map(|svg| {
                     self.state.place_svg(svg, &name);
                 })
-            } else if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case(EXTENSION)) {
+            } else if canvas_core::file::is_project_path(&path) {
                 Err("Omina Edit projects can't be placed; open them instead.".to_owned())
             } else {
                 canvas_core::image_io::open(&path).map(|bitmap| {
@@ -423,7 +435,7 @@ impl Workspace {
 pub fn read_any(path: &Path) -> Result<(Project, canvas_core::Id, bool), String> {
     let extension = path.extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
     let name = path.file_stem().map_or_else(|| "Untitled".to_owned(), |name| name.to_string_lossy().into_owned());
-    if extension == EXTENSION {
+    if canvas_core::file::is_project_path(path) {
         let project = canvas_core::file::load(path)?;
         let active = project.documents.first().map(|document| document.id).ok_or("This project has no documents.")?;
         return Ok((project, active, true));

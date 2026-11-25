@@ -1,76 +1,107 @@
-# Canvas
+<div align="center">
 
-Photo editing, painting and vector design in one app, built in Rust beside Studio: Photoshop-style
-layers, selections, brushes, retouching, adjustments and filters, Lightroom-style Develop settings, and
-Illustrator-style shapes, paths and Pathfinder. It uses Studio's stack (GPUI + gpui-kit) and Studio's
-look: the same themes and accents, top bar of tools, rail, movable dock panels, folding cards, value
-fields, sliders, dialogs, start screen and settings.
+<img src="docs/images/icon.png" width="112" alt="Omina Edit icon">
 
-## Layout
+# Omina Edit
 
-```
-crates/canvas-core    The document model and everything that edits it, with no UI: projects holding
-                      documents and media; pixel, shape, text, fill, adjustment and group layers; masks,
-                      clipping, layer styles, blend modes; selections; the brush engine, fills and
-                      gradients; filters; adjustment layers; Develop (Lightroom) settings; histograms and
-                      auto corrections; Pathfinder booleans and outline stroke (i_overlay); picture files,
-                      SVG in and out, and the .canvas project file (a zip of JSON plus PNGs, checked on load).
-crates/canvas-render  The compositor (tiny-skia, on the CPU, threaded with rayon): draws a document or any
-                      part of it at any scale. Every Photoshop blend mode, masks, clipping masks,
-                      adjustment layers, isolated and pass-through groups, layer styles (drop and inner
-                      shadow, outer glow, stroke, color overlay), text with system fonts (cosmic-text),
-                      vector shapes kept sharp at any zoom, halved copies of big pictures when zoomed out,
-                      and cached Develop results.
-apps/canvas           Desktop app (GPUI + gpui-kit). UI only: panels read `EditorState` and forward input.
-```
+**Photo editing, painting and vector design in one app.**<br>
+Retouch, paint and design in the same document.
 
-Inside `apps/canvas/src`:
+[![Latest release](https://img.shields.io/github/v/release/OddOmens/Omina-Edit?label=release&color=7c5cff)](https://github.com/OddOmens/Omina-Edit/releases/latest)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+![macOS, Windows, Linux](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Built with Rust](https://img.shields.io/badge/built%20with-Rust-dea584)
 
-- `state/`: every editing action, unit-tested without a window. `mod.rs` holds documents, layers, masks
-  and colors; `tools.rs` what each tool does on press, drag and release (move, Free Transform, marquees,
-  lassos, magic wand, crop, eyedropper, brush, pencil, eraser, spot healing, healing, clone stamp, blur,
-  sharpen, smudge, dodge, burn, sponge, gradient, paint bucket, pen, direct selection, type, shapes);
-  `edit.rs` the menu commands (canvas and image size, rotate, trim, crop, auto tone, clipboard, fill and
-  stroke, merge, flatten, rasterize, Pathfinder, align, filters, Develop); `history.rs` undo and the
-  History panel's named steps (whole-project snapshots that share unchanged pixels).
-- `workspace.rs`: the window, menu bar, shortcuts and dock; `commands.rs` what each command does.
-- `panels/`: one module per panel. `viewer.rs` is the canvas: it draws only what is on screen at screen
-  resolution, redraws just the brushed area while painting, and draws the tools' marks (marching ants,
-  transform and crop boxes, path points, brush outline, typing caret). `options.rs` is the tool options
-  bar; `layers.rs`, `properties.rs` (Properties, Develop and Styles tabs), `history.rs`, `align.rs`
-  (with Pathfinder); the side panels the rail picks, `media.rs`, `libraries.rs`, `effects.rs`,
-  `elements.rs`, `mockups.rs`, `templates.rs`, `brushes.rs` and `assistant.rs` (the Design Assistant);
-  dialogs in `dialogs.rs`, `filter_dialog.rs` (live preview), `export.rs`, `settings.rs`, `start_screen.rs`,
-  `color_picker.rs`; and `onboarding.rs`, the welcome setup shown on first launch (as Studio's). `chrome.rs`,
-  `dock.rs` and `theme.rs` are Studio's, so both apps look and behave alike.
-- `features.rs`: the tools and features Settings ▸ Tools & Features can turn off, as Studio's; one that is
-  off is hidden from the top bar, rail, menus, panels, the assistant's answers and the keymap.
-- `keymap.rs`: Photoshop's and Illustrator's keys (V, M, L, W, C, I, B, E, J, S, G, O, P, T, U, H, Z, X, D,
-  [ ], ⌘T, ⌘J, ⌘E, ⌘G, ⌘L, ⌘M, ⌘U…). Tooltips read keys from here.
-- `ui_tests.rs`: headless UI tests, the real window driven with simulated clicks and keys. Tests keep
-  their settings in a temporary folder of their own, never the real settings file.
+**Download:**
+[macOS](https://github.com/OddOmens/Omina-Edit/releases/latest/download/Omina-Edit-macOS.dmg) ·
+[Windows](https://github.com/OddOmens/Omina-Edit/releases/latest/download/Omina-Edit-Windows-Setup.exe) ·
+[Linux](https://github.com/OddOmens/Omina-Edit/releases/latest/download/Omina-Edit-Linux.AppImage)
+&nbsp;|&nbsp; [Release notes](https://github.com/OddOmens/Omina-Edit/releases)
 
-## Commands
+<br>
+
+<img src="docs/images/screenshot.webp" alt="Omina Edit with a design open: the tools, the canvas, and the layers and properties panels">
+
+</div>
+
+<br>
+
+Omina Edit puts Photoshop-style layers, selections, brushes and retouching beside Illustrator-style shapes,
+paths and Pathfinder. Pixel and vector layers sit side by side, so a photo and the type around it live in
+the same file. If you know Photoshop or Illustrator, the tools and keyboard shortcuts are where you expect.
+
+Part of the Omina family, with [Omina Motion](https://github.com/OddOmens/Omina-Motion) for video and motion
+graphics, and [Omina Develop](https://github.com/OddOmens/Omina-Develop) for photo development.
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Install](#install)
+- [Privacy](#privacy)
+- [Build from source](#build-from-source)
+- [License](#license)
+
+## What it does
+
+| | |
+|---|---|
+| 🖌️ **Tools your hands know** | Marquees, lassos, magic wand, brushes, pencil, eraser, gradient and paint bucket. |
+| 🩹 **Retouch** | Spot healing, healing, clone stamp, blur, sharpen, smudge, dodge, burn and sponge. |
+| 🗂️ **Real layers** | Masks, clipping masks, adjustment layers, groups, every Photoshop blend mode, and layer styles such as shadows, glows and strokes. |
+| ✒️ **Vector paths** | Shapes and pen paths that stay sharp at any zoom, combined with Pathfinder, and SVG in and out. |
+| 🔤 **Type** | Text in your system fonts, with fills, strokes and stroke options, favorite fonts and brand fonts. |
+| 🪄 **Filters with a live preview** | Adjust a filter and watch the canvas before you apply it, plus Lightroom-style Develop settings for photos. |
+| ✂️ **Remove backgrounds** | Click a subject and it's cut out, on your own computer. |
+| 🧩 **Start fast** | Templates, mockups and elements, plus brand libraries shared with Omina Motion. |
+| 💬 **Iris** | A built-in helper that spots things worth fixing in a design, fixes them in a click, and answers questions. It follows plain rules, not AI, and can be turned off. |
+| 📤 **Export** | PNG, JPEG, WebP, TIFF, BMP, SVG and PDF. |
+
+<p align="center">
+  <img src="docs/images/detail.webp" width="720" alt="Omina Edit's canvas with a sunset photo selected for Free Transform, beside its Properties panel">
+  <br><sub>A photo layer with its properties, transform and Pathfinder tools.</sub>
+</p>
+
+### Projects
+
+Projects are saved as **`.omie`** files, which open in Omina Edit with a double-click. Projects saved with
+the older `.canvas` extension still open.
+
+## Install
+
+Download the file for your system from the [latest release](https://github.com/OddOmens/Omina-Edit/releases/latest).
+
+| System | Needs | First launch |
+|---|---|---|
+| **macOS** | macOS 13 or later, Apple silicon | The app isn't signed with an Apple Developer ID yet, so macOS asks once. Open the app, close the warning, then go to **System Settings ▸ Privacy & Security** and choose **Open Anyway**. |
+| **Windows** | Windows 10 or 11, 64-bit | The installer isn't signed yet, so Windows may warn you. Choose **More info**, then **Run anyway**. |
+| **Linux** | A 64-bit (x86-64) desktop | Make the AppImage executable (`chmod +x`, or **Properties ▸ Permissions**), then open it. |
+
+## Privacy
+
+- **No accounts, no telemetry, no analytics.**
+- **Background removal runs locally.** Its model downloads once, after asking, and runs on your own computer.
+- **Update checks**, when a build has them, are a plain request for a small file, with nothing about you in it.
+
+## Build from source
+
+You need [Rust](https://rustup.rs). Omina Edit shares some code (Iris and background removal) with
+Omina Motion, so check both out side by side:
 
 ```bash
-cargo run -p canvas --release            # run the editor
-cargo run -p canvas --release -- a.jpg   # open a picture, SVG or .canvas file straight away
-cargo test --workspace                   # run all tests
-cargo clippy --workspace --all-targets
+mkdir "Omina Studio" && cd "Omina Studio"
+git clone https://github.com/OddOmens/Omina-Edit.git "Omina Edit"
+git clone https://github.com/OddOmens/Omina-Motion.git "Omina Motion"
+cd "Omina Edit"
 ```
 
-## Conventions
+```bash
+cargo run -p canvas --release   # run the app
+cargo test --workspace          # run every test
+```
 
-- Document changes go through `EditorState::doc_mut` (or, for painting, the brushed area only), which
-  bumps `revision` and marks what the canvas must redraw. Undo needs nothing from new edits: the
-  workspace records a step whenever the project changed and no drag is in progress, named by
-  `state.label`.
-- Pixels are premultiplied RGBA8 (`canvas_core::Bitmap`), shared with `Arc`; change a pixel layer only
-  through `Raster::pixels_mut` or `set_pixels`, which renew its change stamp so caches notice.
-- Layers are stored bottom to top; the Layers panel lists them top to bottom.
-- Every visible control works or is not shown. Project files are untrusted input (`file::check`).
-- `unsafe` is forbidden workspace-wide.
+The [developer guide](docs/ARCHITECTURE.md) explains how the code is organized and the conventions it follows.
+Pushing a version tag (`v1.2.3`) builds the macOS, Windows and Linux installers and attaches them to that release.
 
 ## License
 
-GPL-3.0-or-later, as Studio. See `LICENSE`.
+Omina Edit is free software under the [GNU General Public License, version 3 or later](LICENSE).

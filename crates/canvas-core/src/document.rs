@@ -15,7 +15,7 @@ use crate::bitmap::{Bitmap, Mask};
 use crate::color::Rgba;
 use crate::develop::Develop;
 use crate::geom::{Affine, IRect, Rect, Vec2};
-use crate::vector::{Paint, Placement, VectorShape};
+use crate::vector::{LineJoin, Paint, Placement, Stroke, StrokeAlign, VectorShape};
 
 /// Identifies a document, layer or media item within a project. Never reused.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -205,6 +205,14 @@ pub struct TextStyle {
     /// Extra space between letters, in thousandths of an em (as Photoshop's tracking).
     pub tracking: f32,
     pub underline: bool,
+    /// Whether the letters are filled with `color`. Off leaves only the stroke: outlined text.
+    pub filled: bool,
+    /// The outline drawn along the letters' edges, with the same options as a shape's stroke.
+    /// It has no paint (draws nothing) until one is picked.
+    pub stroke: Stroke,
+    /// Draws the stroke under the fill instead of over it, so a centered stroke only shows
+    /// outside the letters and doesn't thin them.
+    pub stroke_behind: bool,
     /// The library text style this follows (font, weight, size, leading, tracking and color).
     /// Changing one of those by hand unlinks it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -223,8 +231,24 @@ impl Default for TextStyle {
             line_height: 1.2,
             tracking: 0.0,
             underline: false,
+            filled: true,
+            stroke: Self::default_stroke(),
+            stroke_behind: false,
             template: None,
         }
+    }
+}
+
+impl TextStyle {
+    /// A text stroke before any paint is picked: outside the letters with rounded corners, the
+    /// usual look for outlined type, so turning it on doesn't eat into thin letters.
+    pub fn default_stroke() -> Stroke {
+        Stroke { align: StrokeAlign::Outside, join: LineJoin::Round, ..Stroke::default() }
+    }
+
+    /// Whether the style draws anything at all: a fill, a stroke, or both.
+    pub fn draws(&self) -> bool {
+        self.filled || self.stroke.visible()
     }
 }
 
@@ -281,6 +305,26 @@ pub enum Content {
     Fill(FillLayer),
     Adjustment(Adjustment),
     Group(Group),
+}
+
+impl Content {
+    /// The outline stroke of a shape or text layer, which share the same stroke options.
+    pub fn stroke(&self) -> Option<&Stroke> {
+        match self {
+            Content::Vector(shape) => Some(&shape.stroke),
+            Content::Text(text) => Some(&text.style.stroke),
+            _ => None,
+        }
+    }
+
+    /// `stroke`, to change.
+    pub fn stroke_mut(&mut self) -> Option<&mut Stroke> {
+        match self {
+            Content::Vector(shape) => Some(&mut shape.stroke),
+            Content::Text(text) => Some(&mut text.style.stroke),
+            _ => None,
+        }
+    }
 }
 
 /// A layer mask: shows the layer where white, hides it where black. Sits at (x, y) in the
@@ -824,7 +868,10 @@ impl Layer {
                 paint(&mut shape.fill, visit);
                 paint(&mut shape.stroke.paint, visit);
             }
-            Content::Text(text) => visit(&mut text.style.color),
+            Content::Text(text) => {
+                visit(&mut text.style.color);
+                paint(&mut text.style.stroke.paint, visit);
+            }
             Content::Fill(fill) => paint(&mut fill.paint, visit),
             Content::Adjustment(adjustment) => match adjustment {
                 Adjustment::BlackWhite { tint_color, .. } => visit(tint_color),

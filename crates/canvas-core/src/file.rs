@@ -20,8 +20,20 @@ pub const FORMAT_VERSION: u32 = 1;
 /// The most layers (counting those inside groups) a document may have.
 const MAX_LAYERS: usize = 10_000;
 
-/// The extension of project files.
-pub const EXTENSION: &str = "canvas";
+/// The extension of project files: Omina Edit's own, so double-clicking one opens Edit (".canvas" is also
+/// Obsidian's).
+pub const EXTENSION: &str = "omie";
+
+/// Extensions projects were saved with before, still opened (and still listed with macOS as this app's), so
+/// existing projects keep working. New projects are always saved with `EXTENSION`.
+pub const OLDER_EXTENSIONS: &[&str] = &["canvas"];
+
+/// Whether a path names a project file, by its extension (new or older, any letter case).
+pub fn is_project_path(path: &std::path::Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+        extension.eq_ignore_ascii_case(EXTENSION) || OLDER_EXTENSIONS.iter().any(|older| extension.eq_ignore_ascii_case(older))
+    })
+}
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -256,5 +268,20 @@ mod tests {
         let mut project = sample();
         project.documents[0].layers[0].opacity = f32::NAN;
         assert!(check(&project).is_err());
+    }
+}
+
+#[cfg(test)]
+mod extension_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn new_and_older_project_files_are_both_projects() {
+        assert!(is_project_path(Path::new("/tmp/Poster.omie")));
+        assert!(is_project_path(Path::new("/tmp/POSTER.OMIE")), "letter case doesn't matter");
+        assert!(is_project_path(Path::new("/tmp/Poster.canvas")), "projects saved before .omie still open");
+        assert!(!is_project_path(Path::new("/tmp/Poster.png")));
+        assert!(!is_project_path(Path::new("/tmp/Poster")));
     }
 }

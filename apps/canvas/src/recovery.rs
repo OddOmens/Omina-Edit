@@ -294,6 +294,9 @@ impl Workspace {
                 if !self.ui.settings.onboarded {
                     crate::panels::onboarding::show(self, cx);
                 }
+                // A file double-clicked to launch Edit opens next, offering to save these first.
+                let handed_over = crate::opened_files::take_at_launch();
+                crate::project_files::open_handed_over(self, handed_over, window, cx);
             }
             Err(error) => {
                 crate::project_files::show_error(window, cx, "The unsaved changes couldn't be restored.", error);

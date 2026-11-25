@@ -203,10 +203,7 @@ fn paint_of(workspace: &Workspace, target: Target) -> Option<Paint> {
             Content::Vector(shape) => Some(shape.fill.clone()),
             _ => None,
         },
-        Target::LayerStroke(id) => match layer(id)? {
-            Content::Vector(shape) => Some(shape.stroke.paint.clone()),
-            _ => None,
-        },
+        Target::LayerStroke(id) => layer(id)?.stroke().map(|stroke| stroke.paint.clone()),
         Target::FillLayer(id) => match layer(id)? {
             Content::Fill(fill) => Some(fill.paint.clone()),
             _ => None,
@@ -227,8 +224,8 @@ fn set_paint(workspace: &mut Workspace, target: Target, paint: Paint) {
             }
         }),
         Target::LayerStroke(id) => state.edit_layer(id, "Stroke", |layer| {
-            if let Content::Vector(shape) = &mut layer.content {
-                shape.stroke.paint = paint;
+            if let Some(stroke) = layer.content.stroke_mut() {
+                stroke.paint = paint;
             }
         }),
         Target::FillLayer(id) => state.edit_layer(id, "Fill Layer", |layer| {

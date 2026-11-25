@@ -12,7 +12,7 @@ use usvg::tiny_skia_path::{PathSegment, Point, Transform};
 use crate::color::Rgba;
 use crate::document::{BlendMode, Content, Document, Layer, TextAlign};
 use crate::geom::{Affine, Rect, Vec2};
-use crate::vector::{Anchor, Contour, FillRule, Gradient, GradientKind, GradientStop, LineCap, LineJoin, Paint, PathData, Placement, Stroke, VectorShape};
+use crate::vector::{Anchor, Contour, FillRule, Gradient, GradientKind, GradientStop, LineCap, LineJoin, Paint, PathData, Placement, Stroke, StrokeAlign, VectorShape};
 
 /// The most shapes one file may bring in, against hostile files.
 const MAX_SHAPES: usize = 5_000;
@@ -328,6 +328,62 @@ impl Writer {
         }
     }
 
+    /// A stroke's attributes (paint, `width`, ends, corners, miter limit and dashes), with
+    /// lengths multiplied by `scale`. Each attribute starts with a space.
+    fn stroke_attributes(&mut self, stroke: &Stroke, width: f32, bounds: Rect, placement: Affine, scale: f32) -> String {
+        let (paint, opacity) = self.paint(&stroke.paint, bounds, placement);
+        let cap = match stroke.cap {
+            LineCap::Butt => "butt",
+            LineCap::Round => "round",
+            LineCap::Square => "square",
+        };
+        let join = match stroke.join {
+            LineJoin::Miter => "miter",
+            LineJoin::Round => "round",
+            LineJoin::Bevel => "bevel",
+        };
+        let mut out = format!(" stroke=\"{paint}\" stroke-width=\"{:.2}\" stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\"", width * scale);
+        if stroke.join == LineJoin::Miter && (stroke.miter_limit - 4.0).abs() > 1e-3 {
+            let _ = write!(out, " stroke-miterlimit=\"{}\"", stroke.miter_limit.max(1.0));
+        }
+        if opacity < 0.999 {
+            let _ = write!(out, " stroke-opacity=\"{opacity:.3}\"");
+        }
+        if !stroke.dash.is_empty() {
+            let dashes: Vec<String> = stroke.dash.iter().map(|dash| format!("{}", dash * scale)).collect();
+            let _ = write!(out, " stroke-dasharray=\"{}\"", dashes.join(" "));
+        }
+        out
+    }
+
+    /// The fill and stroke attributes of text. SVG strokes are always centered on the outline;
+    /// an outside stroke on filled text is written twice as wide and under the fill, which
+    /// looks the same. Other inside and outside strokes are written centered, with a note.
+    fn text_paint(&mut self, text: &crate::document::TextLayer) -> String {
+        let style = &text.style;
+        let mut out = if style.filled {
+            let (color, alpha) = css_color(style.color);
+            format!(" fill=\"{color}\" fill-opacity=\"{alpha:.3}\"")
+        } else {
+            " fill=\"none\"".to_owned()
+        };
+        if !style.stroke.visible() {
+            return out;
+        }
+        let outside_under_fill = style.filled && style.stroke.align == StrokeAlign::Outside;
+        if style.stroke.align != StrokeAlign::Center && !outside_under_fill {
+            self.note("Inside and outside strokes on text are written centered in SVG.");
+        }
+        let width = if outside_under_fill { style.stroke.width * 2.0 } else { style.stroke.width };
+        // The text is written in its own coordinates, so its stroke is too.
+        let attributes = self.stroke_attributes(&style.stroke, width, text.local_box(), Affine::IDENTITY, 1.0);
+        out.push_str(&attributes);
+        if outside_under_fill || style.stroke_behind {
+            out.push_str(" paint-order=\"stroke\"");
+        }
+        out
+    }
+
     fn layer(&mut self, layer: &Layer) {
         if !layer.visible {
             return;
@@ -353,33 +409,15 @@ impl Writer {
                     element.push_str(" fill-rule=\"evenodd\"");
                 }
                 if shape.stroke.visible() {
-                    let (stroke, stroke_opacity) = self.paint(&shape.stroke.paint, bounds, placement);
-                    let width = shape.stroke.width * placement.mean_scale();
-                    let cap = match shape.stroke.cap {
-                        LineCap::Butt => "butt",
-                        LineCap::Round => "round",
-                        LineCap::Square => "square",
-                    };
-                    let join = match shape.stroke.join {
-                        LineJoin::Miter => "miter",
-                        LineJoin::Round => "round",
-                        LineJoin::Bevel => "bevel",
-                    };
-                    let _ = write!(element, " stroke=\"{stroke}\" stroke-width=\"{width:.2}\" stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\"");
-                    if stroke_opacity < 0.999 {
-                        let _ = write!(element, " stroke-opacity=\"{stroke_opacity:.3}\"");
-                    }
-                    if !shape.stroke.dash.is_empty() {
-                        // The outline is written at its size on the page, so the dashes are scaled to match.
-                        let dashes: Vec<String> = shape.stroke.dash.iter().map(|dash| format!("{}", dash * placement.mean_scale())).collect();
-                        let _ = write!(element, " stroke-dasharray=\"{}\"", dashes.join(" "));
-                    }
+                    // The outline is written at its size on the page, so the stroke is scaled to match.
+                    let attributes = self.stroke_attributes(&shape.stroke, shape.stroke.width, bounds, placement, placement.mean_scale());
+                    element.push_str(&attributes);
                 }
                 element.push_str("/>\n");
                 self.out.push_str(&element);
             }
             Content::Text(text) => {
-                let (color, alpha) = css_color(text.style.color);
+                let paint = self.text_paint(text);
                 let anchor = match text.style.align {
                     TextAlign::Left => "start",
                     TextAlign::Center => "middle",
@@ -395,7 +433,7 @@ impl Writer {
                 // The whole placement as one matrix, so a slant (skew) comes along with the turn and scale.
                 let _ = write!(
                     self.out,
-                    "<text{common} transform=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\"{} fill=\"{color}\" fill-opacity=\"{alpha:.3}\" text-anchor=\"{anchor}\">",
+                    "<text{common} transform=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\"{}{paint} text-anchor=\"{anchor}\">",
                     matrix(text.placement.to_affine()),
                     escape(&text.style.font_family),
                     text.style.font_size,
@@ -542,5 +580,33 @@ mod tests {
         let (svg, _) = export(&document_with(100, 100, Layer::new(crate::Id(2), "Title", Content::Text(text))));
         let m = placement.to_affine();
         assert!(svg.contains(&format!("transform=\"matrix({} {} {} {} {} {})\"", m.a, m.b, m.c, m.d, m.e, m.f)), "{svg}");
+    }
+
+    #[test]
+    fn text_strokes_are_written_with_their_options() {
+        let text_with = |change: &dyn Fn(&mut crate::document::TextStyle)| {
+            let mut style = crate::document::TextStyle::default();
+            style.stroke.paint = Paint::Solid(Rgba::from_u32(0xff0000));
+            style.stroke.width = 3.0;
+            change(&mut style);
+            let text = crate::document::TextLayer { text: "Hi".into(), style, placement: Placement::default(), box_width: None, measured: Vec2::new(60.0, 80.0) };
+            export(&document_with(100, 100, Layer::new(crate::Id(2), "Title", Content::Text(text))))
+        };
+        // An outside stroke under filled letters: twice as wide, under the fill.
+        let (svg, notes) = text_with(&|_| {});
+        assert!(svg.contains("stroke=\"#ff0000\" stroke-width=\"6.00\"") && svg.contains("paint-order=\"stroke\""), "{svg}");
+        assert!(notes.is_empty(), "{notes:?}");
+        // Hollow, dashed text with sharp corners.
+        let (svg, _) = text_with(&|style| {
+            style.filled = false;
+            style.stroke.align = StrokeAlign::Center;
+            style.stroke.join = LineJoin::Miter;
+            style.stroke.dash = vec![4.0, 2.0];
+        });
+        assert!(svg.contains("fill=\"none\"") && svg.contains("stroke-linejoin=\"miter\"") && svg.contains("stroke-dasharray=\"4 2\""), "{svg}");
+        assert!(!svg.contains("paint-order"), "{svg}");
+        // An inside stroke can't be written exactly, and says so.
+        let (_, notes) = text_with(&|style| style.stroke.align = StrokeAlign::Inside);
+        assert!(notes.iter().any(|note| note.contains("Inside and outside strokes on text")), "{notes:?}");
     }
 }

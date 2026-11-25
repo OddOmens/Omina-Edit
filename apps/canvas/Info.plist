@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Extra keys merged into Omina Edit.app's Info.plist when it is packaged. -->
+<plist version="1.0">
+<dict>
+    <!-- Omina Edit projects (.omie): this app's own file type, so Finder shows them as "Omina Edit Project" with
+         the omie-document icon (assets/icon, made by scripts/make-document-icon.py) and double-clicking
+         one opens it here. -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.oddomens.omina-edit.project</string>
+            <key>UTTypeDescription</key>
+            <string>Omina Edit Project</string>
+            <key>UTTypeIconFile</key>
+            <string>omie-document</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>omie</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/x-omina-edit</string>
+            </dict>
+        </dict>
+    </array>
+    <!-- Projects saved before .omie (.canvas) still open here. ".canvas" is also another app's (Obsidian's
+         canvases), so it's imported rather than claimed, and this app is only an alternate for it. -->
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.oddomens.canvas.project</string>
+            <key>UTTypeDescription</key>
+            <string>Omina Edit Project (older)</string>
+            <key>UTTypeIconFile</key>
+            <string>omie-document</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>canvas</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/x-omina-edit</string>
+            </dict>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Omina Edit Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>omie-document</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.oddomens.omina-edit.project</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Omina Edit Project (older)</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>omie-document</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.oddomens.canvas.project</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

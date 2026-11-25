@@ -494,7 +494,10 @@ fn paint_area(layer: &Layer) -> Option<Rect> {
             Rect::bounding(size.corners().map(|corner| to_document.apply(corner)))
         }
         Content::Vector(shape) => shape.bounds().map(|bounds| bounds.inflate(1.0)),
-        Content::Text(text) if text.measured != Vec2::ZERO => Rect::bounding(text.corners()).map(|bounds| bounds.inflate(text.style.font_size * 0.6 + 2.0)),
+        Content::Text(text) if text.measured != Vec2::ZERO => {
+            let reach = text.style.font_size * 0.6 + 2.0 + text.style.stroke.reach() * text.placement.to_affine().mean_scale();
+            Rect::bounding(text.corners()).map(|bounds| bounds.inflate(reach))
+        }
         Content::Group(group) => {
             let mut area: Option<Rect> = None;
             for child in group.children.iter().filter(|child| child.visible) {
@@ -566,7 +569,7 @@ pub fn to_skia_path(path: &PathData) -> Option<tiny_skia::Path> {
 
 /// A paint as tiny-skia's, with gradients placed over `bounds` (in the coordinates the path
 /// is drawn in) through `placement`.
-fn skia_paint(paint: &Paint, bounds: Rect, placement: Affine) -> Option<tiny_skia::Paint<'static>> {
+pub(crate) fn skia_paint(paint: &Paint, bounds: Rect, placement: Affine) -> Option<tiny_skia::Paint<'static>> {
     let mut out = tiny_skia::Paint { anti_alias: true, ..tiny_skia::Paint::default() };
     match paint {
         Paint::None => return None,
@@ -625,24 +628,34 @@ pub fn draw_shape(shape: &VectorShape, target: &mut Pixmap, transform: Affine) {
         return;
     }
     let Some(paint) = skia_paint(&shape.stroke.paint, local_bounds, placement) else { return };
-    let width = shape.stroke.width * placement.mean_scale();
-    let doubled = !matches!(shape.stroke.align, StrokeAlign::Center) && shape.geometry.fillable();
-    let stroke = tiny_skia::Stroke {
-        width: if doubled { width * 2.0 } else { width },
-        miter_limit: shape.stroke.miter_limit.max(1.0),
-        line_cap: match shape.stroke.cap {
+    // An open path has no inside, so its stroke can only be centered.
+    let align = if shape.geometry.fillable() { shape.stroke.align } else { StrokeAlign::Center };
+    stroke_outline(target, &path, rule, &shape.stroke, align, &paint, placement.mean_scale(), skia_transform);
+}
+
+/// Strokes `path` with `stroke`'s width, caps, corners and dashes (all multiplied by `scale`,
+/// the size the path is drawn at), centered on the outline or kept to its inside or outside.
+/// Shapes and text both draw their strokes here.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stroke_outline(target: &mut Pixmap, path: &tiny_skia::Path, rule: FillRule, stroke: &canvas_core::vector::Stroke, align: StrokeAlign, paint: &tiny_skia::Paint, scale: f32, transform: Transform) {
+    let width = stroke.width * scale;
+    let one_sided = !matches!(align, StrokeAlign::Center);
+    let options = tiny_skia::Stroke {
+        width: if one_sided { width * 2.0 } else { width },
+        miter_limit: stroke.miter_limit.max(1.0),
+        line_cap: match stroke.cap {
             LineCap::Butt => tiny_skia::LineCap::Butt,
             LineCap::Round => tiny_skia::LineCap::Round,
             LineCap::Square => tiny_skia::LineCap::Square,
         },
-        line_join: match shape.stroke.join {
+        line_join: match stroke.join {
             LineJoin::Miter => tiny_skia::LineJoin::Miter,
             LineJoin::Round => tiny_skia::LineJoin::Round,
             LineJoin::Bevel => tiny_skia::LineJoin::Bevel,
         },
-        dash: (!shape.stroke.dash.is_empty() && shape.stroke.dash.iter().all(|dash| *dash >= 0.0))
+        dash: (!stroke.dash.is_empty() && stroke.dash.iter().all(|dash| *dash >= 0.0))
             .then(|| {
-                let mut dashes: Vec<f32> = shape.stroke.dash.iter().map(|dash| dash * placement.mean_scale()).collect();
+                let mut dashes: Vec<f32> = stroke.dash.iter().map(|dash| dash * scale).collect();
                 if dashes.len() % 2 == 1 {
                     dashes.extend(dashes.clone());
                 }
@@ -650,17 +663,17 @@ pub fn draw_shape(shape: &VectorShape, target: &mut Pixmap, transform: Affine) {
             })
             .flatten(),
     };
-    if !doubled {
-        target.stroke_path(&path, &paint, &stroke, skia_transform, None);
+    if !one_sided {
+        target.stroke_path(path, paint, &options, transform, None);
         return;
     }
     // Inside and outside strokes: twice as wide, then cut to one side of the outline.
     let Some(mut mask) = tiny_skia::Mask::new(target.width(), target.height()) else { return };
-    mask.fill_path(&path, rule, true, skia_transform);
-    if shape.stroke.align == StrokeAlign::Outside {
+    mask.fill_path(path, rule, true, transform);
+    if align == StrokeAlign::Outside {
         mask.invert();
     }
-    target.stroke_path(&path, &paint, &stroke, skia_transform, Some(&mask));
+    target.stroke_path(path, paint, &options, transform, Some(&mask));
 }
 
 fn draw_fill(fill: &FillLayer, document: &Document, target: &mut Pixmap, transform: Affine) {

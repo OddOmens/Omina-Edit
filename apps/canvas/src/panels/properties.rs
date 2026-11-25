@@ -142,31 +142,46 @@ fn shape_cards(layer: &Layer, shape: &canvas_core::vector::VectorShape, workspac
     if shape.geometry.fillable() {
         cards.push(section("fill", "Fill", Some(IconName::PaintBucket), vec![], fill_body, workspace, cx));
     }
-    // Stroke.
-    let aligns = [(StrokeAlign::Center, "Center"), (StrokeAlign::Inside, "Inside"), (StrokeAlign::Outside, "Outside")];
-    let caps = [(LineCap::Butt, "Butt"), (LineCap::Round, "Round"), (LineCap::Square, "Square")];
-    let joins = [(LineJoin::Miter, "Miter"), (LineJoin::Round, "Round"), (LineJoin::Bevel, "Bevel")];
-    let dashed = !shape.stroke.dash.is_empty();
-    let stroke_body = div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(row("Color", paint_chip(ElementId::Name(format!("stroke-chip-{}", id.0).into()), &shape.stroke.paint, Target::LayerStroke(id), cx)))
-        .child(row("Width", value_field(FieldTarget::StrokeWidth(id), workspace, cx)))
-        .child(row("Align", segmented(&format!("stroke-align-{}", id.0), &aligns, shape.stroke.align, move |this, align| edit_stroke(this, id, |stroke| stroke.align = align), cx)))
-        .child(row("Caps", segmented(&format!("stroke-cap-{}", id.0), &caps, shape.stroke.cap, move |this, cap| edit_stroke(this, id, |stroke| stroke.cap = cap), cx)))
-        .child(row("Corners", segmented(&format!("stroke-join-{}", id.0), &joins, shape.stroke.join, move |this, join| edit_stroke(this, id, |stroke| stroke.join = join), cx)))
-        .child(row("Dashes", checkbox(ElementId::Name(format!("stroke-dash-{}", id.0).into()), "Dashed line", dashed, move |this, on| {
-            edit_stroke(this, id, |stroke| stroke.dash = if on { vec![stroke.width * 3.0, stroke.width * 2.0] } else { Vec::new() });
-        }, cx)));
-    cards.push(section("stroke", "Stroke", Some(IconName::Spline), vec![], stroke_body, workspace, cx));
+    cards.push(stroke_card(id, &shape.stroke, None, workspace, cx));
     cards
 }
 
+/// A shape's or text's stroke: its color, width, where it sits on the outline, its ends,
+/// corners and dashes. Text (`stroke_behind` given) can also have it drawn under its fill.
+fn stroke_card(id: canvas_core::Id, stroke: &canvas_core::vector::Stroke, stroke_behind: Option<bool>, workspace: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+    let aligns = [(StrokeAlign::Inside, "Inside"), (StrokeAlign::Center, "Center"), (StrokeAlign::Outside, "Outside")];
+    let caps = [(LineCap::Butt, "Butt"), (LineCap::Round, "Round"), (LineCap::Square, "Square")];
+    let joins = [(LineJoin::Miter, "Miter"), (LineJoin::Round, "Round"), (LineJoin::Bevel, "Bevel")];
+    let dashed = !stroke.dash.is_empty();
+    let shown = stroke.visible();
+    let body = div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(row("Color", paint_chip(ElementId::Name(format!("stroke-chip-{}", id.0).into()), &stroke.paint, Target::LayerStroke(id), cx)))
+        .child(row("Width", value_field(FieldTarget::StrokeWidth(id), workspace, cx)))
+        .child(row("Align", segmented(&format!("stroke-align-{}", id.0), &aligns, stroke.align, move |this, align| edit_stroke(this, id, |stroke| stroke.align = align), cx)))
+        .child(row("Corners", segmented(&format!("stroke-join-{}", id.0), &joins, stroke.join, move |this, join| edit_stroke(this, id, |stroke| stroke.join = join), cx)))
+        .when(stroke.join == LineJoin::Miter, |body| body.child(row("Miter Limit", value_field(FieldTarget::StrokeMiter(id), workspace, cx))))
+        .child(row("Ends", segmented(&format!("stroke-cap-{}", id.0), &caps, stroke.cap, move |this, cap| edit_stroke(this, id, |stroke| stroke.cap = cap), cx)))
+        .child(row("Dashes", checkbox(ElementId::Name(format!("stroke-dash-{}", id.0).into()), "Dashed line", dashed, move |this, on| {
+            edit_stroke(this, id, |stroke| stroke.dash = if on { vec![(stroke.width * 3.0).max(1.0), (stroke.width * 2.0).max(1.0)] } else { Vec::new() });
+        }, cx)))
+        .when(dashed, |body| body.child(row("Dash", value_field(FieldTarget::StrokeDash(id), workspace, cx))).child(row("Gap", value_field(FieldTarget::StrokeGap(id), workspace, cx))))
+        .when_some(stroke_behind, |body, behind| {
+            body.child(row("Order", checkbox(ElementId::Name(format!("stroke-behind-{}", id.0).into()), "Behind the fill", behind, move |this, on| {
+                edit_text(this, id, |text| text.style.stroke_behind = on);
+            }, cx)))
+        })
+        .when(!shown, |body| body.child(div().text_size(px(size::SMALL_TEXT)).text_color(hsla(color::MUTED)).child("Pick a color to draw the stroke.")));
+    section("stroke", "Stroke", Some(IconName::Spline), vec![], body, workspace, cx)
+}
+
+/// Changes the stroke of the shape or text layer `id`.
 fn edit_stroke(workspace: &mut Workspace, id: canvas_core::Id, change: impl FnOnce(&mut canvas_core::vector::Stroke)) {
     workspace.state.edit_layer(id, "Stroke", |layer| {
-        if let Content::Vector(shape) = &mut layer.content {
-            change(&mut shape.stroke);
+        if let Some(stroke) = layer.content.stroke_mut() {
+            change(stroke);
         }
     });
 }
@@ -275,7 +290,7 @@ fn text_card(layer: &Layer, text: &canvas_core::document::TextLayer, workspace: 
         .child(row("Leading", value_field(FieldTarget::Leading(id), workspace, cx)))
         .child(row("Tracking", value_field(FieldTarget::Tracking(id), workspace, cx)))
         .child(row("Align", segmented(&format!("text-align-{}", id.0), &aligns, text.style.align, move |this, align| edit_text(this, id, |text| text.style.align = align), cx)))
-        .child(row("Color", paint_chip(ElementId::Name(format!("text-color-{}", id.0).into()), &Paint::Solid(text.style.color), Target::TextColor(id), cx)))
+        .child(row("Fill", div().flex().items_center().gap_2().child(checkbox(ElementId::Name(format!("text-filled-{}", id.0).into()), "On", text.style.filled, move |this, on| edit_text(this, id, |text| text.style.filled = on), cx)).when(text.style.filled, |fill| fill.child(paint_chip(ElementId::Name(format!("text-color-{}", id.0).into()), &Paint::Solid(text.style.color), Target::TextColor(id), cx)))))
         .child(row("Style", div().flex().gap_3().child(checkbox(ElementId::Name(format!("text-italic-{}", id.0).into()), "Italic", text.style.italic, move |this, on| edit_text(this, id, |text| text.style.italic = on), cx)).child(checkbox(ElementId::Name(format!("text-underline-{}", id.0).into()), "Underline", text.style.underline, move |this, on| edit_text(this, id, |text| text.style.underline = on), cx))))
         .child(row("Box", checkbox(ElementId::Name(format!("text-box-{}", id.0).into()), "Wrap in a text box", paragraph, move |this, on| {
             edit_text(this, id, |text| text.box_width = if on { Some(text.measured.x.max(100.0)) } else { None });
@@ -483,6 +498,7 @@ fn properties_tab(workspace: &mut Workspace, cx: &mut Context<Workspace>) -> Vec
     // Text's own settings (font, size, color…) come first, where they show without scrolling.
     if let Content::Text(text) = &layer.content {
         cards.push(text_card(&layer, text, workspace, cx));
+        cards.push(stroke_card(layer.id, &text.style.stroke, Some(text.style.stroke_behind), workspace, cx));
     }
     cards.extend(transform_card(&layer, workspace, cx));
     match &layer.content {

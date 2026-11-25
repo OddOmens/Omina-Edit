@@ -9,6 +9,8 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+# The channel that hands files the system asks to open over to the window.
+futures = "0.3"
 canvas-core.workspace = true
 canvas-render.workspace = true
 iris.workspace = true
@@ -35,10 +37,22 @@ icons = ["../../assets/icon/canvas-512@2x.png", "../../assets/icon/canvas-512.pn
 out-dir = "../../target/packages"
 binaries-dir = "../../target/release"
 binaries = [{ path = "canvas", main = true }]
-resources = ["../../LICENSE"]
+resources = ["../../LICENSE", "../../assets/icon/omie-document.icns"]
+
+# Double-clicking a project opens it in Omina Edit. Windows and Linux installers register this;
+# on macOS, Info.plist declares the file type in full (it replaces what this would write).
+# Projects are .omie (".canvas", the older extension, is also Obsidian's, so it isn't claimed here).
+[[package.metadata.packager.file-associations]]
+extensions = ["omie"]
+name = "Omina Edit Project"
+description = "Omina Edit Project"
+mime-type = "application/x-omina-edit"
+role = "editor"
 
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"
+# Extra Info.plist keys: the project file type this app opens.
+info-plist-path = "Info.plist"
 
 [lints]
 workspace = true

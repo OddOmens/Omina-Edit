@@ -45,7 +45,12 @@ pub enum FieldTarget {
     LayerRotation(Id),
     /// One of a live shape's measurements (see `geometry_fields`).
     Geometry(Id, usize),
+    /// A shape's or text's stroke width, and the length of its dashes and of the gaps between.
     StrokeWidth(Id),
+    StrokeDash(Id),
+    StrokeGap(Id),
+    /// How far a sharp (miter) corner may stick out, as a multiple of the stroke width.
+    StrokeMiter(Id),
     FontSize(Id),
     Leading(Id),
     Tracking(Id),
@@ -234,10 +239,13 @@ impl FieldTarget {
                 }
                 _ => return None,
             },
-            Self::StrokeWidth(id) => match &layer(id)?.content {
-                Content::Vector(shape) => (shape.stroke.width, format(0.1, 1, " px", 0.0, 1000.0)),
-                _ => return None,
-            },
+            Self::StrokeWidth(id) => (layer(id)?.content.stroke()?.width, format(0.1, 1, " px", 0.0, 1000.0)),
+            Self::StrokeMiter(id) => (layer(id)?.content.stroke()?.miter_limit, format(0.05, 1, "", 1.0, 100.0)),
+            Self::StrokeDash(id) | Self::StrokeGap(id) => {
+                let dash = &layer(id)?.content.stroke()?.dash;
+                let index = usize::from(matches!(self, Self::StrokeGap(_)));
+                (*dash.get(index).or(dash.first())?, format(0.1, 1, " px", 0.1, 1000.0))
+            }
             Self::FontSize(id) => match &layer(id)?.content {
                 Content::Text(text) => (text.style.font_size, format(0.5, 1, " pt", 1.0, 5000.0)),
                 _ => return None,
@@ -318,8 +326,24 @@ impl FieldTarget {
                 }
             }),
             Self::StrokeWidth(id) => state.edit_layer(id, "Stroke", |layer| {
-                if let Content::Vector(shape) = &mut layer.content {
-                    shape.stroke.width = value;
+                if let Some(stroke) = layer.content.stroke_mut() {
+                    stroke.width = value;
+                }
+            }),
+            Self::StrokeMiter(id) => state.edit_layer(id, "Stroke", |layer| {
+                if let Some(stroke) = layer.content.stroke_mut() {
+                    stroke.miter_limit = value;
+                }
+            }),
+            Self::StrokeDash(id) | Self::StrokeGap(id) => state.edit_layer(id, "Stroke Dashes", |layer| {
+                let Some(stroke) = layer.content.stroke_mut() else { return };
+                // A single length means dashes and gaps alike; it becomes a pair before one changes.
+                if stroke.dash.len() == 1 {
+                    stroke.dash.push(stroke.dash[0]);
+                }
+                let index = usize::from(matches!(self, Self::StrokeGap(_)));
+                if let Some(length) = stroke.dash.get_mut(index) {
+                    *length = value;
                 }
             }),
             Self::FontSize(id) => state.edit_layer(id, "Font Size", |layer| {
